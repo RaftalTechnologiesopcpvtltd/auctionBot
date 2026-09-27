@@ -69,16 +69,14 @@ jobs:
             docker compose -f docker-compose.prod.yml build
 
             echo "=== [4.5/6] Provisioning SSL Certificates via Certbot ==="
-            mkdir -p /etc/letsencrypt/live/auctionbot.shop
             mkdir -p /var/www/certbot
 
-            # Create bootstrap self-signed certificate if none exists yet, preventing Nginx boot failure
-            if [ ! -f /etc/letsencrypt/live/auctionbot.shop/fullchain.pem ]; then
-              echo "Generating bootstrap self-signed certificate for initial Nginx startup..."
-              openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
-                -keyout /etc/letsencrypt/live/auctionbot.shop/privkey.pem \
-                -out /etc/letsencrypt/live/auctionbot.shop/fullchain.pem \
-                -subj "/CN=auctionbot.shop"
+            # If existing cert is a temporary self-signed bootstrap, clear it so Certbot has a clean directory
+            if [ -f /etc/letsencrypt/live/auctionbot.shop/fullchain.pem ]; then
+              if openssl x509 -in /etc/letsencrypt/live/auctionbot.shop/fullchain.pem -noout -issuer 2>/dev/null | grep -i "auctionbot.shop"; then
+                echo "Detected self-signed bootstrap certificate. Clearing so Certbot can issue genuine Let's Encrypt cert..."
+                rm -rf /etc/letsencrypt/live/auctionbot.shop /etc/letsencrypt/archive/auctionbot.shop /etc/letsencrypt/renewal/auctionbot.shop.conf
+              fi
             fi
 
             # Stop existing nginx container if running to free port 80 for Certbot standalone issuance
@@ -89,15 +87,38 @@ jobs:
               -v /etc/letsencrypt:/etc/letsencrypt \
               -v /var/lib/letsencrypt:/var/lib/letsencrypt \
               certbot/certbot certonly --standalone \
+              --cert-name auctionbot.shop \
               -d auctionbot.shop -d admin.auctionbot.shop -d cyg.auctionbot.shop -d cyg-malaysia.auctionbot.shop -d malaysia.auctionbot.shop \
               --email whyvshow5@gmail.com \
               --agree-tos \
               --no-eff-email \
-              --keep-until-expiring \
-              --non-interactive || echo "Notice: Certbot standalone finished (or kept existing cert)."
+              --non-interactive || {
+                echo "Multi-domain issuance failed. Retrying with primary domain auctionbot.shop..."
+                docker run --rm -p 80:80 \
+                  -v /etc/letsencrypt:/etc/letsencrypt \
+                  -v /var/lib/letsencrypt:/var/lib/letsencrypt \
+                  certbot/certbot certonly --standalone \
+                  --cert-name auctionbot.shop \
+                  -d auctionbot.shop \
+                  --email whyvshow5@gmail.com \
+                  --agree-tos \
+                  --no-eff-email \
+                  --non-interactive || echo "Notice: Certbot failed, falling back."
+              }
+
+            # If still no certificate exists, create self-signed fallback so Nginx doesn't crash on boot
+            if [ ! -f /etc/letsencrypt/live/auctionbot.shop/fullchain.pem ]; then
+              echo "Generating fallback self-signed certificate..."
+              mkdir -p /etc/letsencrypt/live/auctionbot.shop
+              openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
+                -keyout /etc/letsencrypt/live/auctionbot.shop/privkey.pem \
+                -out /etc/letsencrypt/live/auctionbot.shop/fullchain.pem \
+                -subj "/CN=auctionbot.shop"
+            fi
 
             echo "=== [5/6] Starting services ==="
             docker compose -f docker-compose.prod.yml up -d
+
             echo "Restarting Nginx to reload upstream configuration..."
             docker compose -f docker-compose.prod.yml restart nginx
 

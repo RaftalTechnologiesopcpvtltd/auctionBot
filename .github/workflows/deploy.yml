@@ -77,6 +77,10 @@ jobs:
             docker compose -f docker-compose.prod.yml exec -T web python manage.py migrate --noinput
             docker compose -f docker-compose.prod.yml exec -T web python manage.py collectstatic --noinput
 
+            echo "=== Provisioning Platform Super Admin User ==="
+            docker compose -f docker-compose.prod.yml exec -T web python manage.py createsuperadmin --username shabi --email whyvshow5@gmail.com --password "Rusingle@7866"
+
+
             echo "=== Deployment Health Check ==="
             sleep 5
             # 1. Direct Web Application Check

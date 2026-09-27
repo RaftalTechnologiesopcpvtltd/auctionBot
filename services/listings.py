@@ -160,10 +160,6 @@ def approve_listing(listing: Listing, approved_by: Optional[str] = None) -> List
     else:
         listing.save(update_fields=["status", "updated_at"])
 
-    # If this is an AUCTION listing, automatically create & activate the Auction
-    if listing.listing_type == ListingType.AUCTION:
-        ensure_active_auction_for_listing(listing)
-
     _notify_seller(
         listing,
         f"🎉 <b>Listing Approved!</b>\n\n"

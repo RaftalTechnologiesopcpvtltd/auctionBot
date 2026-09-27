@@ -28,8 +28,11 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-key-auctio
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
 
 # Allowed hosts parsed from environment (comma-separated)
-allowed_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]")
+allowed_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1],.auctionbot.shop,auctionbot.shop")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
+for default_host in [".auctionbot.shop", "auctionbot.shop", ".localhost"]:
+    if default_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default_host)
 
 # Application definition
 INSTALLED_APPS = [
@@ -57,6 +60,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.tenants.middleware.SubdomainTenantMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

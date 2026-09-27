@@ -74,31 +74,47 @@
             </div>
         </div>
 
-        <!-- Column 2: Status, Masked Token & Webhook (Screen 4.jpeg) -->
+        <!-- Column 2: Dual Bot Status, Masked Tokens & Webhooks -->
         <div class="space-y-6">
+            <!-- 1. Seller Bot Card -->
             <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
-                <h2 class="text-base font-bold text-slate-900 mb-4">Bot Status & Connection</h2>
-                <div class="space-y-4 text-xs">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-base font-bold text-slate-900">1. Seller Bot (Registration)</h2>
+                    <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold {% if seller_bot.is_active and seller_bot.get_token %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+                        {% if seller_bot.is_active and seller_bot.get_token %}Online & Active{% else %}Unconfigured{% endif %}
+                    </span>
+                </div>
+                <div class="space-y-3 text-xs">
                     <div>
-                        <span class="text-slate-500 block mb-1 font-medium">Bot Status</span>
-                        <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold {% if bot_config %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
-                            {% if bot_config %}Online & Verified{% else %}Not Configured{% endif %}
-                        </span>
+                        <span class="text-slate-500 block mb-1 font-medium">Handle</span>
+                        <span class="font-mono text-slate-800 font-semibold">@{{ seller_bot.bot_username|default:'not configured' }}</span>
                     </div>
-
-                    <div>
-                        <span class="text-slate-500 block mb-1 font-medium">Bot Token (Encrypted at Rest)</span>
-                        <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 font-mono text-slate-600 tracking-widest flex items-center justify-between">
-                            <span>&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
-                            <span class="text-[10px] text-slate-400 font-sans tracking-normal uppercase">Protected</span>
-                        </div>
-                        <p class="text-[11px] text-slate-400 mt-1">Bot tokens are Fernet-encrypted and never displayed in plain text.</p>
-                    </div>
-
                     <div>
                         <span class="text-slate-500 block mb-1 font-medium">Webhook Endpoint</span>
-                        <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 font-mono text-slate-700 break-all text-[11px]">
-                            /telegram/webhook/{{ active_tenant.slug }}/
+                        <div class="p-2 bg-slate-50 rounded-xl border border-slate-200 font-mono text-slate-700 break-all text-[11px]">
+                            {{ seller_bot.webhook_path }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Bidding Bot Card -->
+            <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-base font-bold text-slate-900">2. Bidding Bot (Auctions)</h2>
+                    <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold {% if bidding_bot.is_active and bidding_bot.get_token %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+                        {% if bidding_bot.is_active and bidding_bot.get_token %}Online & Active{% else %}Unconfigured{% endif %}
+                    </span>
+                </div>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <span class="text-slate-500 block mb-1 font-medium">Handle</span>
+                        <span class="font-mono text-slate-800 font-semibold">@{{ bidding_bot.bot_username|default:'not configured' }}</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 block mb-1 font-medium">Webhook Endpoint</span>
+                        <div class="p-2 bg-slate-50 rounded-xl border border-slate-200 font-mono text-slate-700 break-all text-[11px]">
+                            {{ bidding_bot.webhook_path }}
                         </div>
                     </div>
                 </div>

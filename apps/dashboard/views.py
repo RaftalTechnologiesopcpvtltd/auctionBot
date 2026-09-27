@@ -37,8 +37,13 @@ from apps.finance import services as finance_service
 # ---------------------------------------------------------------------------
 
 def login_view(request):
-    """Staff & Admin login for the management dashboard."""
-    if request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser):
+    """Staff & Admin login for the management dashboard with tenant isolation."""
+    if getattr(request, "is_super_admin_host", False):
+        return redirect("/super-admin/login/")
+
+    active_tenant = getattr(request, "tenant", None)
+
+    if request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser or is_tenant_staff(request.user)):
         return redirect("/dashboard/")
 
     if request.method == "POST":
@@ -47,8 +52,26 @@ def login_view(request):
         user = authenticate(request, username=username, password=password)
 
         if user is not None:
-            if user.is_staff or user.is_superuser:
+            # Tenant isolation enforcement
+            if active_tenant:
+                is_authorized = (
+                    user.is_superuser
+                    or is_platform_admin(user)
+                    or TenantMembership.objects.filter(
+                        user=user, tenant=active_tenant, is_active=True
+                    ).exists()
+                )
+                if not is_authorized:
+                    messages.error(
+                        request,
+                        f"Access denied: Your account is not authorized to access {active_tenant.name}."
+                    )
+                    return render(request, "dashboard/login.html", {"active_tenant": active_tenant})
+
+            if user.is_staff or user.is_superuser or is_tenant_staff(user, active_tenant):
                 login(request, user)
+                if active_tenant:
+                    request.session["active_tenant_id"] = active_tenant.id
                 next_url = request.GET.get("next") or request.POST.get("next") or "/dashboard/"
                 return redirect(next_url)
             else:
@@ -56,7 +79,7 @@ def login_view(request):
         else:
             messages.error(request, "Invalid username or password.")
 
-    return render(request, "dashboard/login.html")
+    return render(request, "dashboard/login.html", {"active_tenant": active_tenant})
 
 
 def logout_view(request):
@@ -543,9 +566,9 @@ def telegram_overview_view(request):
 
 @dashboard_auth_required
 def telegram_settings_view(request):
-    """Telegram Bot settings matching screen 4.jpeg."""
+    """Telegram Bot settings showing both Seller Bot and Bidding Bot."""
     tenant = request.tenant
-    bot_config = TelegramBotConfig.objects.filter(tenant=tenant).first()
+    seller_bot, bidding_bot = TelegramBotConfig.ensure_dual_bots(tenant)
 
     if request.method == "POST":
         messages.success(request, "Bot behavior settings saved.")
@@ -553,7 +576,9 @@ def telegram_settings_view(request):
 
     context = {
         "page_title": "Bot Settings",
-        "bot_config": bot_config,
+        "seller_bot": seller_bot,
+        "bidding_bot": bidding_bot,
+        "bot_config": bidding_bot,
     }
     return render(request, "dashboard/telegram/settings.html", context)
 

@@ -1,0 +1,316 @@
+{% extends "super_admin/base.html" %}
+
+{% block title %}Tenants Directory & Management{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+    <!-- KPI Metric Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg">
+            <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Registered Tenants</div>
+            <div class="text-3xl font-extrabold text-white mt-1">{{ total_tenants }}</div>
+            <div class="text-[11px] text-emerald-400 mt-1 font-medium">{{ active_tenants }} Operational</div>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg">
+            <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Configured Telegram Bots</div>
+            <div class="text-3xl font-extrabold text-indigo-400 mt-1">{{ configured_bots }}</div>
+            <div class="text-[11px] text-slate-400 mt-1 font-medium">Seller & Bidding Bots</div>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg">
+            <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Platform Users</div>
+            <div class="text-3xl font-extrabold text-blue-400 mt-1">{{ total_users }}</div>
+            <div class="text-[11px] text-slate-400 mt-1 font-medium">Admins & Staff</div>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-center">
+            <button onclick="toggleRegisterModal(true)" class="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2">
+                <span class="text-base leading-none">+</span> Register New Tenant
+            </button>
+        </div>
+    </div>
+
+    <!-- Tenants Directory Table -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+        <div class="px-6 py-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <h2 class="text-base font-bold text-white">Registered Regional Tenants</h2>
+                <p class="text-xs text-slate-400 mt-0.5">Manage tenants, view login credentials, and configure dual bots.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="toggleAllPasswords()" id="toggle-all-passwords-btn" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-1.5">
+                    <span id="eye-icon">👁️</span> Show All Passwords
+                </button>
+                <button onclick="toggleRegisterModal(true)" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors">
+                    + Add Tenant
+                </button>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-950/60 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[10px]">
+                    <tr>
+                        <th class="px-6 py-3.5">Organization & Subdomain</th>
+                        <th class="px-4 py-3.5">Region / Currency</th>
+                        <th class="px-4 py-3.5">Admin Username</th>
+                        <th class="px-4 py-3.5">Tenant Password</th>
+                        <th class="px-4 py-3.5">Dual Bots Status</th>
+                        <th class="px-4 py-3.5">Status</th>
+                        <th class="px-6 py-3.5 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-medium">
+                    {% for item in tenant_cards %}
+                    <tr class="hover:bg-slate-800/40 transition-colors">
+                        <!-- Organization & Subdomain -->
+                        <td class="px-6 py-4">
+                            <div class="font-bold text-white text-sm">{{ item.tenant.name }}</div>
+                            <div class="mt-1 flex items-center gap-2">
+                                <a href="http://{{ item.tenant.slug }}.auctionbot.shop" target="_blank" class="font-mono text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 text-[11px]">
+                                    {{ item.tenant.slug }}.auctionbot.shop <span class="text-[9px]">↗</span>
+                                </a>
+                                <button onclick="navigator.clipboard.writeText('http://{{ item.tenant.slug }}.auctionbot.shop')" title="Copy URL" class="text-slate-500 hover:text-slate-300 text-[10px]">
+                                    📋
+                                </button>
+                            </div>
+                        </td>
+
+                        <!-- Region / Currency -->
+                        <td class="px-4 py-4 text-slate-300">
+                            <div><span class="font-semibold text-white">{{ item.tenant.code }}</span> &bull; {{ item.tenant.country }}</div>
+                            <div class="text-[11px] text-slate-400 mt-0.5">{{ item.tenant.currency }} &bull; {{ item.tenant.timezone }}</div>
+                        </td>
+
+                        <!-- Admin Username -->
+                        <td class="px-4 py-4">
+                            <span class="font-mono bg-slate-950 px-2 py-1 rounded text-slate-200 border border-slate-800">
+                                {{ item.tenant.admin_username|default:'admin' }}
+                            </span>
+                        </td>
+
+                        <!-- Tenant Password (Visible with toggle) -->
+                        <td class="px-4 py-4">
+                            {% if item.tenant.admin_initial_password %}
+                            <div class="flex items-center gap-2">
+                                <span class="font-mono text-slate-300 bg-slate-950 px-2 py-1 rounded border border-slate-800 tenant-password-masked" data-plain="{{ item.tenant.admin_initial_password }}">
+                                    ••••••••••••
+                                </span>
+                                <button type="button" onclick="togglePassword(this)" title="Toggle Password Visibility" class="text-slate-400 hover:text-slate-200 text-xs px-1.5 py-0.5 bg-slate-800 rounded">
+                                    👁
+                                </button>
+                            </div>
+                            {% else %}
+                            <span class="text-slate-500 italic">Not recorded</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Dual Bots Status -->
+                        <td class="px-4 py-4">
+                            <div class="space-y-1">
+                                <!-- Seller Bot -->
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-2 h-2 rounded-full {% if item.seller_bot.is_active and item.seller_bot.get_token %}bg-emerald-400 shadow-sm shadow-emerald-400/50{% else %}bg-amber-400{% endif %}"></span>
+                                    <span class="text-[11px] text-slate-300">Seller:</span>
+                                    <span class="text-[11px] font-mono {% if item.seller_bot.bot_username %}text-indigo-300{% else %}text-slate-500{% endif %}">
+                                        @{{ item.seller_bot.bot_username|default:'not configured' }}
+                                    </span>
+                                </div>
+                                <!-- Bidding Bot -->
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-2 h-2 rounded-full {% if item.bidding_bot.is_active and item.bidding_bot.get_token %}bg-emerald-400 shadow-sm shadow-emerald-400/50{% else %}bg-amber-400{% endif %}"></span>
+                                    <span class="text-[11px] text-slate-300">Bidding:</span>
+                                    <span class="text-[11px] font-mono {% if item.bidding_bot.bot_username %}text-blue-300{% else %}text-slate-500{% endif %}">
+                                        @{{ item.bidding_bot.bot_username|default:'not configured' }}
+                                    </span>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- Active Status Badge -->
+                        <td class="px-4 py-4">
+                            {% if item.tenant.is_active %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                Operational
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30">
+                                Suspended
+                            </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Actions -->
+                        <td class="px-6 py-4 text-right space-x-2">
+                            <a href="{% url 'super_admin:bots' %}" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                                Manage Bots
+                            </a>
+                            <form method="POST" action="{% url 'super_admin:toggle_tenant' item.tenant.id %}" class="inline">
+                                {% csrf_token %}
+                                <button type="submit" class="px-2 py-1 rounded {% if item.tenant.is_active %}bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30{% else %}bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30{% endif %} text-[11px] transition-colors">
+                                    {% if item.tenant.is_active %}Suspend{% else %}Activate{% endif %}
+                                </button>
+                            </form>
+                            <a href="http://{{ item.tenant.slug }}.auctionbot.shop/dashboard/" target="_blank" class="px-2.5 py-1 rounded bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-semibold border border-indigo-500/30 transition-colors">
+                                Open Portal ↗
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="px-6 py-12 text-center text-slate-500">
+                            No tenants registered yet. Click "Register New Tenant" above.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Register Tenant Modal -->
+<div id="register-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <!-- Close button -->
+        <button onclick="toggleRegisterModal(false)" class="absolute top-5 right-5 text-slate-400 hover:text-white text-xl font-bold">
+            &times;
+        </button>
+
+        <div class="mb-6">
+            <h2 class="text-xl font-bold text-white tracking-tight">Register New Regional Tenant</h2>
+            <p class="text-xs text-slate-400 mt-1">Configure tenant organization details, credentials, and dual bots.</p>
+        </div>
+
+        <form method="POST" action="{% url 'super_admin:register_tenant' %}" class="space-y-4">
+            {% csrf_token %}
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Organization Name *</label>
+                    <input type="text" name="name" required placeholder="e.g. CYG Aquatics Malaysia" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Subdomain Slug *</label>
+                    <div class="flex items-center">
+                        <input type="text" name="slug" id="slug-input" required placeholder="e.g. cyg" oninput="updateSlugPreview(this.value)" class="w-full px-3.5 py-2.5 rounded-l-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <span class="px-3 py-2.5 bg-slate-800 text-slate-400 text-xs rounded-r-xl border border-l-0 border-slate-800 font-mono">.auctionbot.shop</span>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Region Code (2-10 letters) *</label>
+                    <input type="text" name="code" required placeholder="e.g. MY or AU" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs uppercase focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Country</label>
+                    <input type="text" name="country" placeholder="e.g. Malaysia" value="Malaysia" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Currency (3-letter ISO)</label>
+                    <input type="text" name="currency" placeholder="MYR" value="MYR" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs uppercase focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Timezone</label>
+                    <input type="text" name="timezone" placeholder="Asia/Kuala_Lumpur" value="Asia/Kuala_Lumpur" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- Credentials Section -->
+            <div class="pt-4 border-t border-slate-800">
+                <div class="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-3">Tenant Administrator Credentials</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Admin Username *</label>
+                        <input type="text" name="admin_username" required placeholder="e.g. cyg_admin" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Admin Initial Password *</label>
+                        <input type="text" name="admin_password" required placeholder="e.g. CygSecure@2026" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <span class="text-[10px] text-slate-400 mt-0.5 block">Visible in Super Admin dashboard for credential handover.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dual Bots Quick Config -->
+            <div class="pt-4 border-t border-slate-800">
+                <div class="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3">Dual Telegram Bots (Optional Initial Tokens)</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Seller Bot -->
+                    <div class="space-y-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                        <div class="text-xs font-semibold text-white">1. Seller Bot (Registration)</div>
+                        <input type="text" name="seller_bot_username" placeholder="Username e.g. CygSellerBot" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-600 text-xs focus:outline-none">
+                        <input type="text" name="seller_bot_token" placeholder="Bot Token from @BotFather" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-600 text-xs font-mono focus:outline-none">
+                    </div>
+
+                    <!-- Bidding Bot -->
+                    <div class="space-y-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                        <div class="text-xs font-semibold text-white">2. Bidding Bot (Auctions)</div>
+                        <input type="text" name="bidding_bot_username" placeholder="Username e.g. CygAuctionBot" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-600 text-xs focus:outline-none">
+                        <input type="text" name="bidding_bot_token" placeholder="Bot Token from @BotFather" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-600 text-xs font-mono focus:outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4 flex justify-end gap-3">
+                <button type="button" onclick="toggleRegisterModal(false)" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors">
+                    Cancel
+                </button>
+                <button type="submit" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all">
+                    Register Tenant & Initialize Bots
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function toggleRegisterModal(show) {
+        const modal = document.getElementById('register-modal');
+        if (show) {
+            modal.classList.remove('hidden');
+        } else {
+            modal.classList.add('hidden');
+        }
+    }
+
+    function togglePassword(btn) {
+        const container = btn.previousElementSibling;
+        const plain = container.getAttribute('data-plain');
+        if (container.innerText === '••••••••••••') {
+            container.innerText = plain;
+            btn.innerText = '🙈';
+        } else {
+            container.innerText = '••••••••••••';
+            btn.innerText = '👁';
+        }
+    }
+
+    let allPasswordsVisible = false;
+    function toggleAllPasswords() {
+        allPasswordsVisible = !allPasswordsVisible;
+        const spans = document.querySelectorAll('.tenant-password-masked');
+        spans.forEach(span => {
+            const btn = span.nextElementSibling;
+            if (allPasswordsVisible) {
+                span.innerText = span.getAttribute('data-plain');
+                if (btn) btn.innerText = '🙈';
+            } else {
+                span.innerText = '••••••••••••';
+                if (btn) btn.innerText = '👁';
+            }
+        });
+        const mainBtn = document.getElementById('toggle-all-passwords-btn');
+        mainBtn.innerHTML = allPasswordsVisible ? '🙈 Hide All Passwords' : '👁️ Show All Passwords';
+    }
+</script>
+{% endblock %}

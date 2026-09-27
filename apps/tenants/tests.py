@@ -392,3 +392,187 @@ class TenantMembershipSecurityTest(TestCase):
         with self.assertRaises(Http404):
             enforce_tenant_object_access(obj_b, self.tenant_a)
 
+
+class SubdomainMiddlewareTest(TestCase):
+    """Tests for SubdomainTenantMiddleware."""
+
+    def setUp(self):
+        self.tenant = Tenant.objects.create(
+            name="CYG Malaysia",
+            slug="cyg",
+            code="MY",
+            country="Malaysia",
+            timezone="Asia/Kuala_Lumpur",
+            currency="MYR",
+            is_active=True,
+        )
+        self.inactive_tenant = Tenant.objects.create(
+            name="Inactive Aqua",
+            slug="inactive",
+            code="INACT",
+            country="Malaysia",
+            timezone="Asia/Kuala_Lumpur",
+            currency="MYR",
+            is_active=False,
+        )
+
+    def test_admin_subdomain_resolution(self):
+        """admin.auctionbot.shop sets is_super_admin_host=True and redirects root to /super-admin/."""
+        response = self.client.get("/", HTTP_HOST="admin.auctionbot.shop")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/super-admin/")
+
+    def test_tenant_subdomain_resolution(self):
+        """cyg.auctionbot.shop resolves active tenant and redirects root to /dashboard/."""
+        response = self.client.get("/", HTTP_HOST="cyg.auctionbot.shop")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/dashboard/")
+
+    def test_unknown_subdomain_404(self):
+        """nonexistent.auctionbot.shop returns 404 with tenant_not_found page."""
+        response = self.client.get("/", HTTP_HOST="nonexistent.auctionbot.shop")
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "Organization Not Found", status_code=404)
+
+    def test_inactive_subdomain_403(self):
+        """inactive.auctionbot.shop returns 403 with tenant_inactive page."""
+        response = self.client.get("/", HTTP_HOST="inactive.auctionbot.shop")
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "Suspended", status_code=403)
+
+
+class SuperAdminPortalTest(TestCase):
+    """Tests for the Platform Super Admin Portal."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from apps.tenants.models import TenantMembership, TenantRole
+        from apps.telegram_engine.models import BotType
+
+        self.superuser = User.objects.create_superuser(
+            username="superadmin",
+            email="superadmin@auctionbot.shop",
+            password="SuperPassword@786",
+        )
+        self.tenant = Tenant.objects.create(
+            name="CYG Malaysia",
+            slug="cyg",
+            code="MY",
+            country="Malaysia",
+            timezone="Asia/Kuala_Lumpur",
+            currency="MYR",
+            admin_username="cyg_admin",
+            admin_initial_password="InitialPassword@123",
+            is_active=True,
+        )
+
+    def test_unauthenticated_access_redirects(self):
+        """Accessing /super-admin/ without auth redirects to /super-admin/login/."""
+        response = self.client.get("/super-admin/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/super-admin/login/", response.url)
+
+    def test_super_admin_login_and_dashboard(self):
+        """Super admin logs in and views dashboard with tenant password displayed."""
+        login_resp = self.client.post("/super-admin/login/", {
+            "username": "superadmin",
+            "password": "SuperPassword@786",
+        })
+        self.assertEqual(login_resp.status_code, 302)
+
+        dash_resp = self.client.get("/super-admin/")
+        self.assertEqual(dash_resp.status_code, 200)
+        self.assertContains(dash_resp, "CYG Malaysia")
+        self.assertContains(dash_resp, "InitialPassword@123")
+
+    def test_register_tenant_creates_dual_bots_and_credentials(self):
+        """Registering a new tenant provisions admin user, membership, and dual Telegram bots."""
+        from apps.telegram_engine.models import TelegramBotConfig, BotType
+
+        self.client.login(username="superadmin", password="SuperPassword@786")
+        post_data = {
+            "name": "AquaBid Australia",
+            "slug": "aquabid",
+            "code": "AU",
+            "country": "Australia",
+            "currency": "AUD",
+            "timezone": "Australia/Sydney",
+            "admin_username": "aquabid_admin",
+            "admin_password": "AquaPassword@2026",
+            "seller_bot_username": "AquaBidSellerBot",
+            "seller_bot_token": "123456:ABC-SellerToken",
+            "bidding_bot_username": "AquaBidAuctionBot",
+            "bidding_bot_token": "654321:XYZ-BiddingToken",
+        }
+        resp = self.client.post("/super-admin/tenants/register/", post_data)
+        self.assertEqual(resp.status_code, 302)
+
+        new_tenant = Tenant.objects.get(slug="aquabid")
+        self.assertEqual(new_tenant.admin_username, "aquabid_admin")
+        self.assertEqual(new_tenant.admin_initial_password, "AquaPassword@2026")
+
+        # Verify dual bots
+        seller_bot = TelegramBotConfig.objects.get(tenant=new_tenant, bot_type=BotType.SELLER)
+        bidding_bot = TelegramBotConfig.objects.get(tenant=new_tenant, bot_type=BotType.BUYER)
+        self.assertEqual(seller_bot.bot_username, "AquaBidSellerBot")
+        self.assertEqual(seller_bot.get_token(), "123456:ABC-SellerToken")
+        self.assertEqual(bidding_bot.bot_username, "AquaBidAuctionBot")
+        self.assertEqual(bidding_bot.get_token(), "654321:XYZ-BiddingToken")
+
+    def test_toggle_tenant_active(self):
+        """Super admin can suspend and reactivate tenants."""
+        self.client.login(username="superadmin", password="SuperPassword@786")
+        self.assertTrue(self.tenant.is_active)
+
+        self.client.post(f"/super-admin/tenants/{self.tenant.id}/toggle/")
+        self.tenant.refresh_from_db()
+        self.assertFalse(self.tenant.is_active)
+
+        self.client.post(f"/super-admin/tenants/{self.tenant.id}/toggle/")
+        self.tenant.refresh_from_db()
+        self.assertTrue(self.tenant.is_active)
+
+
+class TenantLoginIsolationTest(TestCase):
+    """Tests for tenant isolation during login."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from apps.tenants.models import TenantMembership, TenantRole
+
+        self.tenant_a = Tenant.objects.create(
+            name="CYG Malaysia", slug="cyg", code="MY",
+            country="Malaysia", timezone="Asia/Kuala_Lumpur", currency="MYR", is_active=True,
+        )
+        self.tenant_b = Tenant.objects.create(
+            name="AquaBid Australia", slug="aquabid", code="AU",
+            country="Australia", timezone="Australia/Sydney", currency="AUD", is_active=True,
+        )
+
+        self.user_a = User.objects.create_user(
+            username="cyg_user", password="Password@123", is_staff=True
+        )
+        TenantMembership.objects.create(
+            user=self.user_a, tenant=self.tenant_a, role=TenantRole.TENANT_ADMIN, is_active=True
+        )
+
+    def test_user_can_login_to_own_tenant_subdomain(self):
+        """User A can log into cyg.auctionbot.shop."""
+        response = self.client.post(
+            "/dashboard/login/",
+            {"username": "cyg_user", "password": "Password@123"},
+            HTTP_HOST="cyg.auctionbot.shop",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/dashboard/")
+
+    def test_user_cannot_login_to_foreign_tenant_subdomain(self):
+        """User A is rejected when attempting to log into aquabid.auctionbot.shop."""
+        response = self.client.post(
+            "/dashboard/login/",
+            {"username": "cyg_user", "password": "Password@123"},
+            HTTP_HOST="aquabid.auctionbot.shop",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Access denied: Your account is not authorized to access AquaBid Australia.")
+

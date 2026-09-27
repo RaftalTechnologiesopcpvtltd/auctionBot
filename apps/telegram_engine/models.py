@@ -76,6 +76,26 @@ class TelegramBotConfig(TenantOwnedModel):
         """Safe masked display of the token."""
         return mask_token(self.get_token())
 
+    @property
+    def webhook_path(self) -> str:
+        """Returns the webhook path for this bot."""
+        return f"/telegram/webhook/{self.tenant.slug}/{self.bot_type}/"
+
+    @classmethod
+    def ensure_dual_bots(cls, tenant):
+        """Ensures that both SELLER and BUYER (Bidding) bot configurations exist for the given tenant."""
+        seller_bot, _ = cls.objects.get_or_create(
+            tenant=tenant,
+            bot_type=BotType.SELLER,
+            defaults={"is_active": True}
+        )
+        bidding_bot, _ = cls.objects.get_or_create(
+            tenant=tenant,
+            bot_type=BotType.BUYER,
+            defaults={"is_active": True}
+        )
+        return seller_bot, bidding_bot
+
     def __str__(self) -> str:
         return f"{self.tenant.code} - {self.get_bot_type_display()} (@{self.bot_username or 'unset'})"
 

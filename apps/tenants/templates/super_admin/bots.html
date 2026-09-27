@@ -1,0 +1,202 @@
+{% extends "super_admin/base.html" %}
+
+{% block title %}Dual-Bot Management Center{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-xl font-bold text-white tracking-tight">Dual-Bot Configuration Center</h1>
+            <p class="text-xs text-slate-400 mt-1">
+                Every tenant operates two specialized Telegram bots: a <span class="text-indigo-400 font-semibold">Seller Bot</span> (for listing registrations) and a <span class="text-blue-400 font-semibold">Bidding Bot</span> (for live auctions).
+            </p>
+        </div>
+        <a href="{% url 'super_admin:dashboard' %}" class="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold self-start sm:self-auto transition-colors">
+            &larr; Back to Tenants
+        </a>
+    </div>
+
+    <!-- Tenants Dual-Bot Cards -->
+    <div class="space-y-6">
+        {% for row in bot_rows %}
+        <div class="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl">
+            <!-- Tenant Card Header -->
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-5 border-b border-slate-800/80 gap-3">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-xs uppercase">
+                        {{ row.tenant.code }}
+                    </div>
+                    <div>
+                        <h2 class="text-base font-bold text-white">{{ row.tenant.name }}</h2>
+                        <a href="http://{{ row.tenant.slug }}.auctionbot.shop" target="_blank" class="text-xs font-mono text-indigo-400 hover:underline">
+                            {{ row.tenant.slug }}.auctionbot.shop ↗
+                        </a>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-400">Currency: <span class="font-bold text-white">{{ row.tenant.currency }}</span></span>
+                    <span class="text-slate-600">&bull;</span>
+                    <span class="text-xs text-slate-400">Timezone: <span class="font-bold text-white">{{ row.tenant.timezone }}</span></span>
+                </div>
+            </div>
+
+            <!-- Dual Bots Side-by-Side Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-6">
+
+                <!-- 1. Seller Bot -->
+                <div class="bg-slate-950/60 rounded-2xl p-5 border border-slate-800/80 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full {% if row.seller_bot.is_active and row.seller_bot.get_token %}bg-emerald-400 shadow-md shadow-emerald-400/50{% else %}bg-amber-400{% endif %}"></span>
+                            <h3 class="text-sm font-bold text-indigo-300">1. Seller Bot</h3>
+                        </div>
+                        <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            Fish Registration
+                        </span>
+                    </div>
+
+                    <form method="POST" action="{% url 'super_admin:update_bot' row.seller_bot.id %}" class="space-y-3 text-xs">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">Bot Username</label>
+                            <div class="flex items-center">
+                                <span class="px-2.5 py-2 bg-slate-900 border border-r-0 border-slate-800 rounded-l-xl text-slate-500">@</span>
+                                <input type="text" name="bot_username" value="{{ row.seller_bot.bot_username }}" placeholder="CygSellerBot" class="w-full px-3 py-2 rounded-r-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">API Token (Fernet Encrypted at Rest)</label>
+                            <input type="password" name="bot_token" placeholder="{% if row.seller_bot.get_token %}•••••••••••••••••••• (Leave blank to keep current){% else %}Paste bot token from @BotFather{% endif %}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                        </div>
+
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">Webhook Endpoint URL</label>
+                            <div class="flex items-center bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                                <input type="text" readonly value="{{ row.seller_webhook }}" id="seller-wh-{{ row.seller_bot.id }}" class="w-full px-3 py-2 bg-transparent text-slate-400 font-mono text-[11px] focus:outline-none">
+                                <button type="button" onclick="navigator.clipboard.writeText('{{ row.seller_webhook }}'); alert('Webhook URL copied!');" class="px-3 py-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs transition-colors">
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-2">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" name="is_active" {% if row.seller_bot.is_active %}checked{% endif %} class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-0">
+                                <span class="text-slate-300 font-medium">Bot Active</span>
+                            </label>
+
+                            <div class="flex items-center space-x-2">
+                                <button type="button" onclick="testBotConnection({{ row.seller_bot.id }}, this)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                                    Test Connection
+                                </button>
+                                <button type="submit" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                        <div id="test-result-{{ row.seller_bot.id }}" class="hidden text-[11px] p-2 rounded-lg mt-2"></div>
+                    </form>
+                </div>
+
+                <!-- 2. Bidding Bot -->
+                <div class="bg-slate-950/60 rounded-2xl p-5 border border-slate-800/80 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full {% if row.bidding_bot.is_active and row.bidding_bot.get_token %}bg-emerald-400 shadow-md shadow-emerald-400/50{% else %}bg-amber-400{% endif %}"></span>
+                            <h3 class="text-sm font-bold text-blue-300">2. Bidding Bot</h3>
+                        </div>
+                        <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            Auctions & Bidding
+                        </span>
+                    </div>
+
+                    <form method="POST" action="{% url 'super_admin:update_bot' row.bidding_bot.id %}" class="space-y-3 text-xs">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">Bot Username</label>
+                            <div class="flex items-center">
+                                <span class="px-2.5 py-2 bg-slate-900 border border-r-0 border-slate-800 rounded-l-xl text-slate-500">@</span>
+                                <input type="text" name="bot_username" value="{{ row.bidding_bot.bot_username }}" placeholder="CygAuctionBot" class="w-full px-3 py-2 rounded-r-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">API Token (Fernet Encrypted at Rest)</label>
+                            <input type="password" name="bot_token" placeholder="{% if row.bidding_bot.get_token %}•••••••••••••••••••• (Leave blank to keep current){% else %}Paste bot token from @BotFather{% endif %}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+
+                        <div>
+                            <label class="block font-semibold text-slate-400 mb-1">Webhook Endpoint URL</label>
+                            <div class="flex items-center bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                                <input type="text" readonly value="{{ row.bidding_webhook }}" id="bidding-wh-{{ row.bidding_bot.id }}" class="w-full px-3 py-2 bg-transparent text-slate-400 font-mono text-[11px] focus:outline-none">
+                                <button type="button" onclick="navigator.clipboard.writeText('{{ row.bidding_webhook }}'); alert('Webhook URL copied!');" class="px-3 py-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs transition-colors">
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-2">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" name="is_active" {% if row.bidding_bot.is_active %}checked{% endif %} class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0">
+                                <span class="text-slate-300 font-medium">Bot Active</span>
+                            </label>
+
+                            <div class="flex items-center space-x-2">
+                                <button type="button" onclick="testBotConnection({{ row.bidding_bot.id }}, this)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                                    Test Connection
+                                </button>
+                                <button type="submit" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                        <div id="test-result-{{ row.bidding_bot.id }}" class="hidden text-[11px] p-2 rounded-lg mt-2"></div>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+        {% empty %}
+        <div class="bg-slate-900 rounded-2xl p-12 text-center text-slate-500 text-xs">
+            No tenants configured. Please register a tenant first.
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    async function testBotConnection(botId, btn) {
+        const resultDiv = document.getElementById(`test-result-${botId}`);
+        const originalText = btn.innerText;
+        btn.innerText = "Testing...";
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`/super-admin/bots/${botId}/test/`);
+            const data = await response.json();
+            resultDiv.classList.remove('hidden');
+
+            if (data.ok) {
+                resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+                resultDiv.innerHTML = `<strong>Connected!</strong> Telegram Bot verified: <code>@${data.username}</code> (${data.first_name})`;
+            } else {
+                resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-red-500/20 text-red-300 border border-red-500/40";
+                resultDiv.innerHTML = `<strong>Failed:</strong> ${data.error}`;
+            }
+        } catch (err) {
+            resultDiv.classList.remove('hidden');
+            resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-red-500/20 text-red-300 border border-red-500/40";
+            resultDiv.innerHTML = `<strong>Error:</strong> Network error while reaching server.`;
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+</script>
+{% endblock %}

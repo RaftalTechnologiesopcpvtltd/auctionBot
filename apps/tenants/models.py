@@ -62,6 +62,16 @@ class Tenant(models.Model):
         db_index=True,
         help_text="Controls whether this tenant is operational and accepting traffic.",
     )
+    admin_username = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text="Primary administrative account username for this tenant.",
+    )
+    admin_initial_password = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Initial admin password visible to Super Admin for credentials handover.",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         db_index=True,
@@ -71,6 +81,11 @@ class Tenant(models.Model):
         auto_now=True,
         help_text="Timestamp when the tenant configuration was last modified.",
     )
+
+    @property
+    def subdomain_url(self) -> str:
+        """Returns the public subdomain URL for this tenant."""
+        return f"http://{self.slug}.auctionbot.shop"
 
     class Meta:
         verbose_name = "Tenant"

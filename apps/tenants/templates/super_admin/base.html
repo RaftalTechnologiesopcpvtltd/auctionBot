@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Platform Super Admin{% endblock %} - AquaBid</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        code, .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased">
+
+    <!-- Top Navigation Header -->
+    <header class="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-6">
+                <a href="{% url 'super_admin:dashboard' %}" class="flex items-center space-x-3 group">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform">
+                        ⚡
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold tracking-tight text-white flex items-center gap-2">
+                            AquaBid <span class="text-[10px] uppercase tracking-wider bg-blue-500/20 text-blue-400 font-semibold px-2 py-0.5 rounded-full border border-blue-500/30">Super Admin</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400">Platform Management System</div>
+                    </div>
+                </a>
+
+                <nav class="hidden md:flex items-center space-x-1 pl-4 border-l border-slate-800 text-xs font-semibold">
+                    <a href="{% url 'super_admin:dashboard' %}" class="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+                        Tenants & Users
+                    </a>
+                    <a href="{% url 'super_admin:bots' %}" class="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+                        Dual-Bot Management
+                    </a>
+                    <a href="/admin/" target="_blank" class="px-3 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors flex items-center gap-1">
+                        Django Admin <span class="text-[10px]">↗</span>
+                    </a>
+                </nav>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <div class="text-right hidden sm:block">
+                    <div class="text-xs font-semibold text-white">{{ request.user.username }}</div>
+                    <div class="text-[10px] text-emerald-400">Platform Administrator</div>
+                </div>
+                <a href="{% url 'super_admin:logout' %}" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 border border-slate-700/80 hover:border-red-500/30 text-xs font-medium transition-colors">
+                    Sign Out
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Global Alert Messages -->
+    {% if messages %}
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 w-full">
+        {% for message in messages %}
+        <div class="p-3.5 mb-2 rounded-xl text-xs font-semibold flex items-center justify-between {% if message.tags == 'error' %}bg-red-500/20 text-red-300 border border-red-500/40{% elif message.tags == 'success' %}bg-emerald-500/20 text-emerald-300 border border-emerald-500/40{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/40{% endif %}">
+            <span>{{ message }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Platform Footer -->
+    <footer class="border-t border-slate-800/80 py-4 text-center text-xs text-slate-500">
+        AquaBid Unified Multi-Tenant Auction Platform &bull; Subdomain Router &copy; 2026
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

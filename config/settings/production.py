@@ -18,6 +18,9 @@ allowed_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS")
 if not allowed_hosts_raw:
     raise ValueError("DJANGO_ALLOWED_HOSTS must be explicitly defined in production.")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
+for default_host in [".auctionbot.shop", "auctionbot.shop"]:
+    if default_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default_host)
 
 # Security Hardening
 SECURE_BROWSER_XSS_FILTER = True
@@ -30,6 +33,16 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 csrf_trusted_raw = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 if csrf_trusted_raw:
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted_raw.split(",") if origin.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = []
+for default_origin in [
+    "http://*.auctionbot.shop",
+    "https://*.auctionbot.shop",
+    "http://auctionbot.shop",
+    "https://auctionbot.shop",
+]:
+    if default_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(default_origin)
 
 # Production Logging (Console stream for containerized / 12-factor log management)
 LOGGING["root"]["level"] = "WARNING"  # noqa: F405

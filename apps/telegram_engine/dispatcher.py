@@ -2,7 +2,7 @@
 import logging
 from typing import Any, Dict, Optional, Tuple
 from apps.tenants.models import Tenant
-from apps.telegram_engine.models import TelegramBotConfig, TelegramUser
+from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, BotType
 from services.telegram import TelegramService
 
 logger = logging.getLogger(__name__)
@@ -99,14 +99,39 @@ class TelegramDispatcher:
         chat_id: int,
         args: str,
     ) -> Dict[str, Any]:
-        """Handle the /start command."""
+        """Handle the /start command customized for bot type."""
         user_name = user.first_name if user and user.first_name else "Guest"
-        text = (
-            f"Hello {user_name}! 👋\n\n"
-            f"Welcome to <b>{self.tenant.name}</b> auction bot.\n"
-            f"Official currency: <b>{self.tenant.currency}</b> | Timezone: <b>{self.tenant.timezone}</b>\n\n"
-            "Use /help to view available commands."
-        )
+        bot_type = getattr(self.bot_config, "bot_type", "UNIFIED")
+
+        if bot_type == BotType.SELLER:
+            text = (
+                f"Hello {user_name}! 👋\n\n"
+                f"Welcome to <b>{self.tenant.name} Seller Bot</b>.\n"
+                f"Official currency: <b>{self.tenant.currency}</b>\n\n"
+                "Use this bot to register fish and submit auction listings:\n"
+                "• /register - Register as an authorized seller\n"
+                "• /list - Submit a new item or fish lot\n"
+                "• /help - View seller guidelines"
+            )
+        elif bot_type == BotType.BUYER:
+            text = (
+                f"Hello {user_name}! 👋\n\n"
+                f"Welcome to <b>{self.tenant.name} Bidding Bot</b>.\n"
+                f"Official currency: <b>{self.tenant.currency}</b>\n\n"
+                "Use this bot to browse live auctions and place real-time bids:\n"
+                "• /auctions - Browse active auction lots\n"
+                "• /bid - View lot bidding instructions\n"
+                "• /wallet - Check account balance\n"
+                "• /help - View bidding commands"
+            )
+        else:
+            text = (
+                f"Hello {user_name}! 👋\n\n"
+                f"Welcome to <b>{self.tenant.name}</b> auction bot.\n"
+                f"Official currency: <b>{self.tenant.currency}</b> | Timezone: <b>{self.tenant.timezone}</b>\n\n"
+                "Use /help to view available commands."
+            )
+
         try:
             self.telegram_service.send_message(chat_id=chat_id, text=text)
         except Exception as exc:
@@ -126,14 +151,39 @@ class TelegramDispatcher:
         chat_id: int,
         args: str,
     ) -> Dict[str, Any]:
-        """Handle the /help command."""
-        text = (
-            f"<b>{self.tenant.name} Support & Commands</b>\n\n"
-            "Available commands:\n"
-            "• /start - Restart the bot and view tenant welcome\n"
-            "• /help - View this help documentation\n\n"
-            f"For inquiries, contact your regional {self.tenant.name} team."
-        )
+        """Handle the /help command customized for bot type."""
+        bot_type = getattr(self.bot_config, "bot_type", "UNIFIED")
+
+        if bot_type == BotType.SELLER:
+            text = (
+                f"<b>{self.tenant.name} Seller Support & Commands</b>\n\n"
+                "Commands:\n"
+                "• /start - Restart the seller session\n"
+                "• /register - Register as an approved seller\n"
+                "• /list - Create new fish lot listing\n"
+                "• /help - View this help documentation\n\n"
+                f"For support, contact your regional {self.tenant.name} staff."
+            )
+        elif bot_type == BotType.BUYER:
+            text = (
+                f"<b>{self.tenant.name} Bidding Support & Commands</b>\n\n"
+                "Commands:\n"
+                "• /start - Restart the bidding session\n"
+                "• /auctions - View active auctions\n"
+                "• /bid &lt;lot_id&gt; &lt;amount&gt; - Place bid\n"
+                "• /wallet - View escrow wallet\n"
+                "• /help - View this help documentation\n\n"
+                f"For support, contact your regional {self.tenant.name} staff."
+            )
+        else:
+            text = (
+                f"<b>{self.tenant.name} Support & Commands</b>\n\n"
+                "Available commands:\n"
+                "• /start - Restart the bot and view tenant welcome\n"
+                "• /help - View this help documentation\n\n"
+                f"For inquiries, contact your regional {self.tenant.name} team."
+            )
+
         try:
             self.telegram_service.send_message(chat_id=chat_id, text=text)
         except Exception as exc:

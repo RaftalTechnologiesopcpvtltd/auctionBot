@@ -1,0 +1,3 @@
+# Root requirements file pointing to development dependencies
+# Used by standard linters, editors, Docker, CI/CD runners, and package managers
+-r requirements/development.txt

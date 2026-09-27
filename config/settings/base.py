@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     # Project apps
     "apps.core.apps.CoreConfig",
     "apps.tenants.apps.TenantsConfig",
+    "apps.listings.apps.ListingsConfig",
+    "apps.bidding.apps.BiddingConfig",
 ]
 
 MIDDLEWARE = [

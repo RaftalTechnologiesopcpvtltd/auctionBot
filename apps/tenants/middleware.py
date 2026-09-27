@@ -38,6 +38,9 @@ class SubdomainTenantMiddleware:
         # 2. Specific Tenant Subdomain routing (<tenant_slug>.auctionbot.shop)
         elif subdomain:
             tenant = Tenant.objects.filter(slug__iexact=subdomain).first()
+            if not tenant and subdomain == "cyg":
+                tenant = Tenant.objects.filter(slug__iexact="cyg-malaysia").first()
+
             if not tenant:
                 return render(
                     request,
@@ -45,6 +48,7 @@ class SubdomainTenantMiddleware:
                     {"subdomain": subdomain, "host": host},
                     status=404,
                 )
+
             if not tenant.is_active:
                 return render(
                     request,

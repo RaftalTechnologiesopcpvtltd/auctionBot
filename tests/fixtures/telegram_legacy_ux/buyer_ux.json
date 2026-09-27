@@ -1,0 +1,55 @@
+{
+  "commands": {
+    "start": "/start",
+    "cancel": "/cancel"
+  },
+  "menus": {
+    "main_menu_buttons": [
+      ["Start", "Helpdesk"],
+      ["❤️ My Favourites", "Check Out"],
+      ["My Bids", "Auction Ending Soon"],
+      ["Join Group", "About"],
+      ["My Delivery Address"]
+    ],
+    "show_listings_prompt_buttons": [
+      ["Show All Auctions", "Show All Buy It Now"]
+    ]
+  },
+  "messages": {
+    "greeting": "Welcome!",
+    "blocked": "⚠️ You cannot access this bot as you are blocked.",
+    "contact_required": "⚠️ You need to provide your contact details first.",
+    "enter_contact": "Enter the following details:\nName:\nEmail:\nContact No:\nAddress:\n",
+    "contact_updated": "Your details have been updated successfully.",
+    "password_prompt": "🔒 Please enter the password to access this bot.",
+    "password_authorized": "You have been authorized! \nWelcome! Please choose an option:",
+    "password_incorrect": "❌ Incorrect password. Please try again.",
+    "choose_option": "Please choose an option:",
+    "show_listings_prompt": "Click the button below to see all the fishes listings:",
+    "no_listings_moment": "No listings at the moment.",
+    "no_listings_found": "No listings found.",
+    "cancel_process": "Process Cancelled. \nYou can start again by using /start.\nOr use /cancel to cancel any process.",
+    "cancel_process_inline": "Process has been cancelled.\n/start",
+    "starting_bid": "Starting the bidding process for Listing ID #{listing_id}.",
+    "bid_placed": "You have placed a bid of ${amount} on Listing ID {listing_id}. The current amount is now ${new_amount}.",
+    "wishlist_added": "Listing #{listing_id} added to My ❤️.",
+    "wishlist_already": "Listing is already in My ❤️.",
+    "wishlist_removed": "Listing removed from My ❤️.",
+    "wishlist_empty": "You have no items in My ❤️.",
+    "checkout_header": "Here are the won listings and accepted offers:",
+    "my_bids_header": "Here are your active bids :\n\n",
+    "no_video": "No video available.",
+    "divider": "____________________________________________________________"
+  },
+  "callbacks": {
+    "show_listings": "show_listings",
+    "buy_now_listings": "buy_now_listings",
+    "start_bid_prefix": "start_bid_",
+    "bid_amount_prefix": "bid_amount_",
+    "refresh_listing_prefix": "refresh_auction_listing_",
+    "wishlist_prefix": "wishlist_",
+    "remove_wishlist_prefix": "remove_from_wishlist_",
+    "update_contact": "update_buyer_contact_details_",
+    "cancel_process": "cancel_process"
+  }
+}

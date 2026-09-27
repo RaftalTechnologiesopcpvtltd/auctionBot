@@ -43,6 +43,20 @@ class TelegramBotConfig(TenantOwnedModel):
         default=True,
         help_text="Whether this bot configuration is active and accepting webhook updates.",
     )
+    require_password = models.BooleanField(
+        default=False,
+        help_text="Whether this bot requires a password for access.",
+    )
+    access_password = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Password required for user authorization when require_password is True.",
+    )
+    require_contact_details = models.BooleanField(
+        default=False,
+        help_text="Whether buyer bot requires delivery contact details before browsing.",
+    )
 
     class Meta:
         verbose_name = "Telegram Bot Configuration"
@@ -138,6 +152,15 @@ class TelegramUser(TenantOwnedModel):
     is_blocked = models.BooleanField(
         default=False,
         help_text="Whether the user has blocked the bot or been banned.",
+    )
+    contact_details = models.TextField(
+        blank=True,
+        default="",
+        help_text="Buyer/user delivery contact details (Name, Email, Contact No, Address).",
+    )
+    is_authorized = models.BooleanField(
+        default=False,
+        help_text="Whether the user has entered the access password (if required).",
     )
 
     class Meta:

@@ -1,0 +1,74 @@
+{
+  "commands": {
+    "start": "/start",
+    "cancel": "/cancel"
+  },
+  "menus": {
+    "main_menu_buttons": [
+      ["Start New Listing", "Helpdesk"],
+      ["My Listings", "Live Listings"],
+      ["My Closed Listings", "Auction Ending Soon"],
+      ["Sold Items", "My Wallet"],
+      ["Join Group", "About"]
+    ],
+    "breed_options": [
+      "Antiques, Art & Collectables",
+      "Baby & Children",
+      "Books, Music & Games",
+      "Cars & Vehicles",
+      "Clothing & Jewellery",
+      "Electronic & Computer",
+      "Home & Garden",
+      "Pets & Accessories",
+      "Sport & Fitness",
+      "Miscellaneous Goods"
+    ],
+    "category_options": [
+      "Auction",
+      "Buy It Now"
+    ],
+    "duration_options": [
+      "Manual Input",
+      "1 day",
+      "2 days",
+      "3 days",
+      "5 days",
+      "10 days"
+    ]
+  },
+  "messages": {
+    "blocked": "⚠️ You cannot access this bot as you are blocked.",
+    "password_prompt": "🔒 Please enter the password to access this bot.",
+    "password_authorized": "✅ You have been authorized!\nWelcome! Please choose an option:",
+    "password_incorrect": "❌ Incorrect password. Please try again.",
+    "welcome_choose_option": "Welcome! Please choose an option:",
+    "listing_wizard_welcome": "Welcome! Please provide the necessary details for your product listing.",
+    "category_type_prompt": "Category Type (Please select from the list below):\n\n/cancel",
+    "product_title_prompt": "Product Title:\n\n/cancel",
+    "product_description_prompt": "Product Description:\n\n/cancel",
+    "quantity_prompt": "Quantity Available:\n\n/cancel",
+    "contact_prompt": "Contact Information:\n\n/cancel",
+    "select_listing_option": "Select the listing option below :\n\n/cancel",
+    "starting_price_prompt": "Starting Price:\n\n/cancel",
+    "auto_accept_offer_price_prompt": "Auto accept offer price:\n\n/cancel",
+    "min_bid_prompt": "Auction Minimum Bid Price (in $):\n\n/cancel",
+    "start_date_prompt": "Start Date:\n\n/cancel",
+    "start_time_prompt": "Start Time:\n(HH:MM AM/PM)\n\n/cancel",
+    "end_time_prompt": "End Time:\n\n/cancel",
+    "upload_images_prompt": "Upload Images (Max 4):\n\n/cancel",
+    "max_pictures_reached": "You have already uploaded the maximum number of pictures.",
+    "upload_video_prompt": "Upload Video: \n(.mp4 format and max 10 mb)",
+    "listing_saved_success": "Thank You! Your listing has been successfully saved and sent for admin approval.\n/start bot",
+    "no_listings_available": "You have no listings available."
+  },
+  "callbacks": {
+    "start_new_listing": "start_new_listing",
+    "skip_picture": "skip_picture",
+    "skip_video": "skip_video",
+    "delete_prefix": "delete_",
+    "trigger_start": "trigger_start",
+    "add_seller_money_prefix": "add_seller_money_",
+    "wallet_amount_save_prefix": "wallet_amount_save_",
+    "give_payment_details_prefix": "give_payment_details_"
+  }
+}

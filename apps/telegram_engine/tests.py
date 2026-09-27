@@ -463,271 +463,6 @@ class SellerTelegramWorkflowAndSecurityTest(TelegramEngineTestBase):
             "username": "ahmad_seller",
         }
 
-    def test_seller_registration_full_flow(self):
-        """Seller registers through conversational questionnaire and profile is created."""
-        from apps.listings.models import Seller, SellerStatus
-
-        # 1. /start command
-        update_start = {
-            "update_id": 1001,
-            "message": {
-                "message_id": 1,
-                "from": self.from_user,
-                "chat": {"id": self.chat_id},
-                "text": "/start",
-            },
-        }
-        res = self.dispatcher.dispatch(update_start)
-        self.assertTrue(res["handled"])
-        self.mock_tg_svc.send_message.assert_called()
-
-        # 2. Click Register callback
-        update_cb = {
-            "update_id": 1002,
-            "callback_query": {
-                "id": "cb_reg_01",
-                "from": self.from_user,
-                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
-                "data": "seller_register",
-            },
-        }
-        res_cb = self.dispatcher.dispatch(update_cb)
-        self.assertEqual(res_cb["step"], "BUSINESS_NAME")
-
-        # 3. Enter Business Name
-        self.dispatcher.dispatch({
-            "update_id": 1003,
-            "message": {"message_id": 2, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Aquatic Paradise MY"},
-        })
-
-        # 4. Enter Contact Name
-        self.dispatcher.dispatch({
-            "update_id": 1004,
-            "message": {"message_id": 3, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Ahmad Razak"},
-        })
-
-        # 5. Enter Phone
-        self.dispatcher.dispatch({
-            "update_id": 1005,
-            "message": {"message_id": 4, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "+60123456789"},
-        })
-
-        # 6. Enter Email
-        self.dispatcher.dispatch({
-            "update_id": 1006,
-            "message": {"message_id": 5, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "ahmad@aquaticparadise.my"},
-        })
-
-        # 7. Enter Address
-        res_final = self.dispatcher.dispatch({
-            "update_id": 1007,
-            "message": {"message_id": 6, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Kulai, Johor, Malaysia"},
-        })
-        self.assertTrue(res_final["handled"])
-
-        # Assert Seller record created
-        seller = Seller.objects.get(tenant=self.tenant_my, seller_id=str(self.chat_id))
-        self.assertEqual(seller.business_name, "Aquatic Paradise MY")
-        self.assertEqual(seller.contact_name, "Ahmad Razak")
-        self.assertEqual(seller.phone, "+60123456789")
-        self.assertEqual(seller.email, "ahmad@aquaticparadise.my")
-        self.assertEqual(seller.status, SellerStatus.ACTIVE)
-
-    def test_listing_wizard_flow_and_submission(self):
-        """Registered seller creates listing with photos, reviews draft, and submits for approval."""
-        from apps.listings.models import Seller, Listing, ListingStatus, ListingImage
-
-        # Create registered seller
-        tg_user = TelegramUser.objects.create(
-            tenant=self.tenant_my,
-            telegram_user_id=self.chat_id,
-            chat_id=self.chat_id,
-            username="ahmad_seller",
-            first_name="Ahmad",
-        )
-        Seller.objects.create(
-            tenant=self.tenant_my,
-            telegram_user=tg_user,
-            seller_id=str(self.chat_id),
-            business_name="Aquatic Paradise MY",
-            contact_name="Ahmad Razak",
-            phone="+60123456789",
-        )
-
-        # 1. Trigger create listing callback
-        self.dispatcher.dispatch({
-            "update_id": 2001,
-            "callback_query": {
-                "id": "cb_list_01",
-                "from": self.from_user,
-                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
-                "data": "create_listing",
-            },
-        })
-
-        # 2. Title
-        self.dispatcher.dispatch({
-            "update_id": 2002,
-            "message": {"message_id": 2, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "High Grade Super Red Betta Pair"},
-        })
-
-        # 3. Description
-        self.dispatcher.dispatch({
-            "update_id": 2003,
-            "message": {"message_id": 3, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Proven breeder pair, 3.5 months old, fed live daphnia."},
-        })
-
-        # 4. Category
-        self.dispatcher.dispatch({
-            "update_id": 2004,
-            "callback_query": {
-                "id": "cb_cat_01",
-                "from": self.from_user,
-                "message": {"message_id": 3, "chat": {"id": self.chat_id}},
-                "data": "cat_select:Betta",
-            },
-        })
-
-        # 5. Starting Price
-        self.dispatcher.dispatch({
-            "update_id": 2005,
-            "message": {"message_id": 4, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "80.00"},
-        })
-
-        # 6. Buy Now Price (optional)
-        self.dispatcher.dispatch({
-            "update_id": 2006,
-            "message": {"message_id": 5, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "150.00"},
-        })
-
-        # 7. Quantity
-        self.dispatcher.dispatch({
-            "update_id": 2007,
-            "message": {"message_id": 6, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "1"},
-        })
-
-        # 8. Upload Photo
-        photo_update = {
-            "update_id": 2008,
-            "message": {
-                "message_id": 7,
-                "from": self.from_user,
-                "chat": {"id": self.chat_id},
-                "photo": [
-                    {"file_id": "thumb_123", "width": 100, "height": 100},
-                    {"file_id": "highres_123", "width": 800, "height": 800},
-                ],
-            },
-        }
-        res_photo = self.dispatcher.dispatch(photo_update)
-        self.assertEqual(res_photo["photo_count"], 1)
-
-        # 9. Click Done with photos -> shows review
-        self.dispatcher.dispatch({
-            "update_id": 2009,
-            "callback_query": {
-                "id": "cb_done_01",
-                "from": self.from_user,
-                "message": {"message_id": 7, "chat": {"id": self.chat_id}},
-                "data": "listing_images_done",
-            },
-        })
-
-        # 10. Click Submit Listing
-        res_submit = self.dispatcher.dispatch({
-            "update_id": 2010,
-            "callback_query": {
-                "id": "cb_sub_01",
-                "from": self.from_user,
-                "message": {"message_id": 8, "chat": {"id": self.chat_id}},
-                "data": "submit_listing",
-            },
-        })
-        self.assertTrue(res_submit["handled"])
-        listing_id = res_submit["listing_id"]
-
-        # Assert DB listing state
-        listing = Listing.objects.get(id=listing_id)
-        self.assertEqual(listing.tenant, self.tenant_my)
-        self.assertEqual(listing.seller_id, str(self.chat_id))
-        self.assertEqual(listing.title, "High Grade Super Red Betta Pair")
-        self.assertEqual(listing.category, "Betta")
-        self.assertEqual(listing.status, ListingStatus.PENDING)
-        self.assertEqual(listing.metadata["starting_price"], "80.00")
-        self.assertEqual(listing.metadata["buy_now_price"], "150.00")
-
-        # Verify images attached
-        self.assertEqual(ListingImage.objects.filter(listing=listing).count(), 1)
-        self.assertEqual(ListingImage.objects.get(listing=listing).telegram_file_id, "highres_123")
-
-    def test_draft_recovery_on_start(self):
-        """In-progress listing draft is preserved and prompts recovery on subsequent /start."""
-        from apps.listings.models import Seller
-        from apps.telegram_engine.models import TelegramConversationState, ConversationState
-
-        tg_user = TelegramUser.objects.create(
-            tenant=self.tenant_my,
-            telegram_user_id=self.chat_id,
-            chat_id=self.chat_id,
-            username="ahmad_seller",
-        )
-        Seller.objects.create(
-            tenant=self.tenant_my,
-            telegram_user=tg_user,
-            seller_id=str(self.chat_id),
-            business_name="Aquatic Paradise MY",
-            contact_name="Ahmad Razak",
-            phone="+60123456789",
-        )
-
-        conv = TelegramConversationState.objects.create(
-            tenant=self.tenant_my,
-            telegram_user=tg_user,
-            bot_type=BotType.SELLER,
-            state=ConversationState.CREATING_LISTING,
-            step="STARTING_PRICE",
-            context_data={"listing_draft": {"title": "Rare Discus Fish"}},
-        )
-
-        # User sends /start
-        res = self.dispatcher.dispatch({
-            "update_id": 3001,
-            "message": {
-                "message_id": 1,
-                "from": self.from_user,
-                "chat": {"id": self.chat_id},
-                "text": "/start",
-            },
-        })
-        self.assertEqual(res["action"], "prompt_resume_draft")
-
-        # User clicks resume
-        res_resume = self.dispatcher.dispatch({
-            "update_id": 3002,
-            "callback_query": {
-                "id": "cb_res_01",
-                "from": self.from_user,
-                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
-                "data": "resume_listing",
-            },
-        })
-        self.assertEqual(res_resume["action"], "resumed")
-        self.assertEqual(res_resume["step"], "STARTING_PRICE")
-
-        # User clicks cancel
-        res_cancel = self.dispatcher.dispatch({
-            "update_id": 3003,
-            "callback_query": {
-                "id": "cb_can_01",
-                "from": self.from_user,
-                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
-                "data": "cancel_listing",
-            },
-        })
-        self.assertTrue(res_cancel["handled"])
-        conv.refresh_from_db()
-        self.assertEqual(conv.state, ConversationState.IDLE)
-
     def test_tenant_isolation_seller_workflows(self):
         """Seller in Tenant MY cannot affect Tenant AU state."""
         from apps.listings.models import Seller
@@ -814,5 +549,512 @@ class SellerTelegramWorkflowAndSecurityTest(TelegramEngineTestBase):
             self.assertEqual(call_kwargs["chat_id"], self.chat_id)
             self.assertIn("Listing Not Approved", call_kwargs["text"])
             self.assertIn("Unclear photos of fish gills", call_kwargs["text"])
+
+
+class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
+    """Exhaustive tests verifying exact byte-for-byte legacy Telegram UX parity, multi-tenant isolation, and concurrent bidding."""
+
+    def setUp(self):
+        self.tenant_my = Tenant.objects.create(
+            name="CYG Aquatics Malaysia",
+            slug="cyg-malaysia",
+            code="MY",
+            country="Malaysia",
+            currency="MYR",
+            timezone="Asia/Kuala_Lumpur",
+            is_active=True,
+        )
+        self.tenant_au = Tenant.objects.create(
+            name="AquaBid Australia",
+            slug="aquabid-australia",
+            code="AU",
+            country="Australia",
+            currency="AUD",
+            timezone="Australia/Sydney",
+            is_active=True,
+        )
+
+        self.buyer_bot_my = TelegramBotConfig.objects.create(
+            tenant=self.tenant_my,
+            bot_type=BotType.BUYER,
+            bot_username="cyg_bidding_bot",
+            is_active=True,
+            require_password=False,
+            require_contact_details=False,
+        )
+        self.seller_bot_my = TelegramBotConfig.objects.create(
+            tenant=self.tenant_my,
+            bot_type=BotType.SELLER,
+            bot_username="cyg_seller_bot",
+            is_active=True,
+            require_password=False,
+        )
+
+        self.buyer_bot_au = TelegramBotConfig.objects.create(
+            tenant=self.tenant_au,
+            bot_type=BotType.BUYER,
+            bot_username="aquabid_bidding_bot",
+            is_active=True,
+        )
+
+        self.mock_tg_svc = MagicMock(spec=TelegramService)
+
+        self.dispatcher_buyer_my = TelegramDispatcher(
+            tenant=self.tenant_my,
+            bot_config=self.buyer_bot_my,
+            telegram_service=self.mock_tg_svc,
+        )
+        self.dispatcher_seller_my = TelegramDispatcher(
+            tenant=self.tenant_my,
+            bot_config=self.seller_bot_my,
+            telegram_service=self.mock_tg_svc,
+        )
+        self.dispatcher_buyer_au = TelegramDispatcher(
+            tenant=self.tenant_au,
+            bot_config=self.buyer_bot_au,
+            telegram_service=self.mock_tg_svc,
+        )
+
+        self.buyer_user_id = 987654321
+        self.chat_id = 987654321
+
+    def test_golden_fixture_parity(self):
+        """Verify that centralized messages and keyboards match the legacy UX golden fixtures exactly."""
+        import json
+        from apps.telegram_engine.messages import BuyerMessages, SellerMessages
+        from apps.telegram_engine.keyboards import BuyerKeyboards, SellerKeyboards
+
+        with open("tests/fixtures/telegram_legacy_ux/buyer_ux.json", "r", encoding="utf-8") as f:
+            buyer_fixture = json.load(f)
+
+        self.assertEqual(BuyerMessages.GREETING, buyer_fixture["messages"]["greeting"])
+        self.assertEqual(BuyerMessages.BLOCKED_USER, buyer_fixture["messages"]["blocked"])
+        self.assertEqual(BuyerMessages.CONTACT_REQUIRED, buyer_fixture["messages"]["contact_required"])
+        self.assertEqual(BuyerMessages.PASSWORD_PROMPT, buyer_fixture["messages"]["password_prompt"])
+        self.assertEqual(BuyerMessages.CHOOSE_OPTION, buyer_fixture["messages"]["choose_option"])
+        self.assertEqual(BuyerMessages.SHOW_LISTINGS_PROMPT, buyer_fixture["messages"]["show_listings_prompt"])
+        self.assertEqual(BuyerMessages.NO_LISTINGS_MOMENT, buyer_fixture["messages"]["no_listings_moment"])
+        self.assertEqual(BuyerMessages.PROCESS_CANCELLED, buyer_fixture["messages"]["cancel_process"])
+
+        # Check main menu keyboard layout and exact row widths
+        expected_buyer_kb = buyer_fixture["menus"]["main_menu_buttons"]
+        actual_buyer_kb = [
+            [btn["text"] for btn in row]
+            for row in BuyerKeyboards.main_menu()["keyboard"]
+        ]
+        self.assertEqual(actual_buyer_kb, expected_buyer_kb)
+
+        # Check seller main menu keyboard
+        with open("tests/fixtures/telegram_legacy_ux/seller_ux.json", "r", encoding="utf-8") as f:
+            seller_fixture = json.load(f)
+
+        expected_seller_kb = seller_fixture["menus"]["main_menu_buttons"]
+        actual_seller_kb = [
+            [btn["text"] for btn in row]
+            for row in SellerKeyboards.main_menu()["keyboard"]
+        ]
+        self.assertEqual(actual_seller_kb, expected_seller_kb)
+
+    def test_buyer_start_and_menu_navigation(self):
+        """Test full Buyer /start and custom keyboard navigation."""
+        from apps.telegram_engine.messages import BuyerMessages
+
+        update = {
+            "message": {
+                "message_id": 1,
+                "date": 1727464000,
+                "chat": {"id": self.chat_id, "type": "private"},
+                "from": {"id": self.buyer_user_id, "first_name": "Shabi", "username": "shabi_buyer"},
+                "text": "/start",
+            }
+        }
+        res = self.dispatcher_buyer_my.dispatch(update)
+        self.assertTrue(res["handled"])
+
+        # Expect two messages: "Welcome!" with keyboard remove, then "Please choose an option:" with main menu
+        self.assertEqual(self.mock_tg_svc.send_message.call_count, 2)
+        call1 = self.mock_tg_svc.send_message.call_args_list[0][1]
+        call2 = self.mock_tg_svc.send_message.call_args_list[1][1]
+        self.assertEqual(call1["text"], BuyerMessages.GREETING)
+        self.assertEqual(call2["text"], BuyerMessages.CHOOSE_OPTION)
+        self.assertIn("keyboard", call2["reply_markup"])
+
+    def test_buyer_start_shows_all_auctions_prompt(self):
+        """Clicking 'Start' reply button prompts with Show All Auctions inline buttons."""
+        from apps.telegram_engine.messages import BuyerMessages
+
+        self.mock_tg_svc.reset_mock()
+        update = {
+            "message": {
+                "message_id": 2,
+                "chat": {"id": self.chat_id, "type": "private"},
+                "from": {"id": self.buyer_user_id, "first_name": "Shabi"},
+                "text": "Start",
+            }
+        }
+        res = self.dispatcher_buyer_my.dispatch(update)
+        self.assertTrue(res["handled"])
+
+        self.mock_tg_svc.send_message.assert_called_once()
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], BuyerMessages.SHOW_LISTINGS_PROMPT)
+        self.assertIn("inline_keyboard", call["reply_markup"])
+        btn_texts = [btn["text"] for row in call["reply_markup"]["inline_keyboard"] for btn in row]
+        self.assertIn("Show All Auctions", btn_texts)
+        self.assertIn("Show All Buy It Now", btn_texts)
+
+    def test_buyer_bidding_flow_atomic_and_tenant_isolated(self):
+        """Buyer selects an auction, starts bid, selects bid amount, and places atomic bid."""
+        from decimal import Decimal
+        from django.utils import timezone
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import Auction, AuctionStatus, Bid
+        from apps.telegram_engine.messages import BuyerMessages
+
+        # Create active auction in Tenant MY
+        listing_my = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="seller_my_1",
+            seller_username="FishMasterMY",
+            title="Golden Dragon Arowana",
+            description="High quality super red arowana with microchip.",
+            category="Arowana",
+            quantity=1,
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+        )
+        auction_my = Auction.objects.create(
+            tenant=self.tenant_my,
+            listing=listing_my,
+            starting_price=Decimal("100.00"),
+            bid_increment=Decimal("10.00"),
+            current_price=Decimal("0.00"),
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        # 1. Callback 'show_listings' displays the listing
+        self.mock_tg_svc.reset_mock()
+        cb_update = {
+            "callback_query": {
+                "id": "cb_query_1",
+                "from": {"id": self.buyer_user_id, "username": "shabi_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": "show_listings",
+            }
+        }
+        res = self.dispatcher_buyer_my.dispatch(cb_update)
+        self.assertTrue(res["handled"])
+        # Listing card was sent
+        self.assertTrue(self.mock_tg_svc.send_message.call_count >= 2)
+
+        # 2. Callback 'start_bid_{listing_id}'
+        self.mock_tg_svc.reset_mock()
+        start_bid_update = {
+            "callback_query": {
+                "id": "cb_query_2",
+                "from": {"id": self.buyer_user_id, "username": "shabi_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"start_bid_{listing_my.id}",
+            }
+        }
+        res = self.dispatcher_buyer_my.dispatch(start_bid_update)
+        self.assertTrue(res["handled"])
+
+        # Expect dynamic increment buttons ($10, $20, $30, $40, $50, $60, Cancel)
+        last_call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertIn("Please choose your bid amount", last_call["text"])
+        kb = last_call["reply_markup"]["inline_keyboard"]
+        amounts = [btn["text"] for row in kb for btn in row]
+        self.assertIn("$10", amounts)
+        self.assertIn("$20", amounts)
+        self.assertIn("Cancel", amounts)
+
+        # 3. Callback 'bid_amount_{listing_id}_{amount}' places atomic bid
+        self.mock_tg_svc.reset_mock()
+        bid_amount_update = {
+            "callback_query": {
+                "id": "cb_query_3",
+                "from": {"id": self.buyer_user_id, "username": "shabi_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"bid_amount_{listing_my.id}_10",
+            }
+        }
+        res = self.dispatcher_buyer_my.dispatch(bid_amount_update)
+        self.assertTrue(res["handled"])
+
+        # Verify DB atomic bid was created
+        auction_my.refresh_from_db()
+        self.assertEqual(auction_my.current_price, Decimal("110.00"))
+        bid = Bid.objects.filter(auction=auction_my, bidder_id=str(self.buyer_user_id)).first()
+        self.assertIsNotNone(bid)
+        self.assertEqual(bid.amount, Decimal("110.00"))
+
+        # Verify exact success message
+        success_call = self.mock_tg_svc.send_message.call_args[1]
+        expected_msg = BuyerMessages.BID_PLACED_SUCCESS.format(
+            amount=10,
+            listing_id=listing_my.id,
+            new_amount=110,
+        )
+        self.assertEqual(success_call["text"], expected_msg)
+
+    def test_tenant_isolation_prevents_cross_tenant_bidding(self):
+        """Buyer connecting to Tenant AU cannot see or bid on Tenant MY listing."""
+        from decimal import Decimal
+        from django.utils import timezone
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import Auction, AuctionStatus
+
+        # Create active auction in Tenant MY
+        listing_my = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="seller_my_99",
+            title="Exclusive MY Fish",
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+        )
+        auction_my = Auction.objects.create(
+            tenant=self.tenant_my,
+            listing=listing_my,
+            starting_price=Decimal("50.00"),
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        # Attempt tampering: AU dispatcher receives callback targeting MY listing
+        self.mock_tg_svc.reset_mock()
+        tampered_update = {
+            "callback_query": {
+                "id": "cb_tamper",
+                "from": {"id": 11223344, "username": "au_attacker"},
+                "message": {"chat": {"id": 11223344}},
+                "data": f"start_bid_{listing_my.id}",
+            }
+        }
+        res = self.dispatcher_buyer_au.dispatch(tampered_update)
+        self.assertTrue(res["handled"])
+        # Must return Listing not found and not reveal anything
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], "Listing not found.")
+
+    def test_wishlist_add_and_remove(self):
+        """User can add item to favorites and remove it cleanly."""
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import BuyerWishlist
+        from apps.telegram_engine.messages import BuyerMessages
+
+        listing = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="seller_my",
+            title="Rare Coral Frags",
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+        )
+
+        # Add to wishlist
+        self.mock_tg_svc.reset_mock()
+        add_cb = {
+            "callback_query": {
+                "id": "cb_wish_1",
+                "from": {"id": self.buyer_user_id, "username": "shabi_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"wishlist_{listing.id}",
+            }
+        }
+        self.dispatcher_buyer_my.dispatch(add_cb)
+        self.mock_tg_svc.answer_callback_query.assert_called_with(
+            "cb_wish_1",
+            BuyerMessages.WISHLIST_ADDED.format(listing_id=listing.id),
+        )
+
+        wishlist_entry = BuyerWishlist.objects.filter(
+            tenant=self.tenant_my,
+            telegram_user__telegram_user_id=self.buyer_user_id,
+            listing=listing,
+        ).first()
+        self.assertIsNotNone(wishlist_entry)
+
+        # Remove from wishlist
+        self.mock_tg_svc.reset_mock()
+        remove_cb = {
+            "callback_query": {
+                "id": "cb_wish_2",
+                "from": {"id": self.buyer_user_id, "username": "shabi_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"remove_from_wishlist_{wishlist_entry.id}",
+            }
+        }
+        self.dispatcher_buyer_my.dispatch(remove_cb)
+        self.mock_tg_svc.answer_callback_query.assert_called_with(
+            "cb_wish_2",
+            BuyerMessages.WISHLIST_REMOVED,
+        )
+        self.assertFalse(BuyerWishlist.objects.filter(id=wishlist_entry.id).exists())
+
+    def test_seller_listing_wizard_flow(self):
+        """Seller starts listing wizard, selects category, inputs fields, and completes draft."""
+        from apps.listings.models import Listing, ListingStatus
+        from apps.telegram_engine.messages import SellerMessages
+
+        # 1. Trigger 'Start New Listing'
+        self.mock_tg_svc.reset_mock()
+        update = {
+            "message": {
+                "message_id": 1,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "first_name": "SellerShabi"},
+                "text": "Start New Listing",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(update)
+        self.assertTrue(res["handled"])
+        call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertEqual(call["text"], SellerMessages.CATEGORY_TYPE_PROMPT)
+
+        # 2. Select breed option
+        self.mock_tg_svc.reset_mock()
+        cb = {
+            "callback_query": {
+                "id": "cb_b1",
+                "from": {"id": self.buyer_user_id},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": "Home & Garden",
+            }
+        }
+        self.dispatcher_seller_my.dispatch(cb)
+        call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertEqual(call["text"], SellerMessages.PRODUCT_TITLE_PROMPT)
+
+        # 3. Enter Title
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 2, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "Aquarium Filter 2000L/H"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.PRODUCT_DESCRIPTION_PROMPT)
+
+        # 4. Enter Description
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 3, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "Brand new external canister filter."}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.QUANTITY_PROMPT)
+
+        # 5. Enter Quantity
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 4, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "2"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.CONTACT_PROMPT)
+
+        # 6. Enter Contact Information
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 5, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "+60123456789"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.SELECT_LISTING_OPTION)
+
+        # 7. Select 'Auction'
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {"id": "cb_opt", "from": {"id": self.buyer_user_id}, "message": {"chat": {"id": self.chat_id}}, "data": "Auction"}
+        })
+        call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertEqual(call["text"], SellerMessages.STARTING_PRICE_PROMPT)
+
+        # 8. Enter Starting Price
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 6, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "50"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.AUTO_ACCEPT_OFFER_PRICE_PROMPT)
+
+        # 9. Enter Auto Accept Price
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 7, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "100"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.MIN_BID_PROMPT)
+
+        # 10. Enter Minimum Bid
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 8, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "10"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.START_DATE_PROMPT)
+
+        # 11. Enter Start Date
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 9, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "28-09-2026"}
+        })
+        call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertEqual(call["text"], SellerMessages.START_TIME_PROMPT)
+
+        # 12. Enter Start Time
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "message": {"message_id": 10, "chat": {"id": self.chat_id}, "from": {"id": self.buyer_user_id}, "text": "10:00 AM"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.END_TIME_PROMPT)
+
+        # 13. Select End Time Duration preset (1 day)
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {"id": "cb_dur", "from": {"id": self.buyer_user_id}, "message": {"chat": {"id": self.chat_id}}, "data": "1_day_auction"}
+        })
+        call = self.mock_tg_svc.send_message.call_args_list[-1][1]
+        self.assertEqual(call["text"], SellerMessages.UPLOAD_IMAGES_PROMPT)
+
+        # 14. Upload a photo
+        self.mock_tg_svc.reset_mock()
+        photo_update = {
+            "message": {
+                "message_id": 11,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id},
+                "photo": [{"file_id": "photo_file_123", "file_size": 50000}],
+            }
+        }
+        self.dispatcher_seller_my.dispatch(photo_update)
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertIn("You can upload more pictures (3 left)", call["text"])
+
+        # 15. Skip Picture -> prompts for Video
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {"id": "cb_skip_pic", "from": {"id": self.buyer_user_id}, "message": {"chat": {"id": self.chat_id}}, "data": "skip_picture"}
+        })
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], SellerMessages.UPLOAD_VIDEO_PROMPT)
+
+        # 16. Skip Video -> finalizes listing
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {"id": "cb_skip_vid", "from": {"id": self.buyer_user_id}, "message": {"chat": {"id": self.chat_id}}, "data": "skip_video"}
+        })
+        self.assertEqual(self.mock_tg_svc.send_message.call_count, 2)
+        call1 = self.mock_tg_svc.send_message.call_args_list[0][1]
+        call2 = self.mock_tg_svc.send_message.call_args_list[1][1]
+        self.assertEqual(call1["text"], SellerMessages.LISTING_SAVED_SUCCESS)
+        self.assertEqual(call2["text"], SellerMessages.EDIT_DETAILS_PROMPT)
+
+        # Verify listing was created in DB with status PENDING
+        created_listing = Listing.objects.filter(tenant=self.tenant_my, title="Aquarium Filter 2000L/H").first()
+        self.assertIsNotNone(created_listing)
+        self.assertEqual(created_listing.status, ListingStatus.PENDING)
+        self.assertEqual(created_listing.quantity, 2)
+        self.assertEqual(created_listing.images.count(), 1)
+
 
 

@@ -2,8 +2,9 @@
 import logging
 from typing import Any, Dict, Optional, Tuple
 from apps.tenants.models import Tenant
-from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, BotType, ConversationState
+from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, BotType
 from apps.telegram_engine.seller_workflow import SellerWorkflow
+from apps.telegram_engine.buyer_workflow import BuyerWorkflow
 from services.telegram import TelegramService
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ class TelegramDispatcher:
         self.bot_config = bot_config
         self.telegram_service = telegram_service or TelegramService(bot_config)
         self.seller_workflow = SellerWorkflow(
+            tenant=self.tenant,
+            bot_config=self.bot_config,
+            telegram_service=self.telegram_service,
+        )
+        self.buyer_workflow = BuyerWorkflow(
             tenant=self.tenant,
             bot_config=self.bot_config,
             telegram_service=self.telegram_service,
@@ -76,45 +82,47 @@ class TelegramDispatcher:
     def _handle_message_update(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         user = self._sync_user(message_data.get("from"), message_data.get("chat"))
         chat_id = message_data.get("chat", {}).get("id")
+        bot_type = getattr(self.bot_config, "bot_type", BotType.UNIFIED)
 
-        # Handle Photo Uploads in active creation workflow
+        # 1. Handle Photo Uploads in active creation workflow
         if "photo" in message_data and user and chat_id:
-            return self.seller_workflow.handle_photo_upload(user, chat_id, message_data["photo"])
+            caption = message_data.get("caption", "")
+            return self.seller_workflow.handle_photo(user, chat_id, message_data["photo"], caption=caption)
+
+        # 2. Handle Video Uploads
+        if "video" in message_data and user and chat_id:
+            return self.seller_workflow.handle_video(user, chat_id, message_data["video"])
 
         text = message_data.get("text", "")
-
         command, args = self._parse_command(text)
-        if command:
-            return self._route_command(user, chat_id, command, args)
 
-        # Handle in-flight interactive conversational state
-        if user and chat_id:
-            conv = self.seller_workflow.get_or_create_state(user)
-            if conv.state == ConversationState.REGISTERING:
-                return self.seller_workflow.handle_registration_input(user, chat_id, text)
-            elif conv.state == ConversationState.CREATING_LISTING:
-                return self.seller_workflow.handle_listing_input(user, chat_id, text)
+        # 3. Route Commands
+        if command:
+            if command == "start" and user and chat_id:
+                if bot_type == BotType.BUYER:
+                    return self.buyer_workflow.handle_start(user, chat_id)
+                elif bot_type == BotType.SELLER:
+                    return self.seller_workflow.handle_start(user, chat_id)
+                else:
+                    return self.handle_start(user, chat_id, args)
+
+            elif command == "cancel" and user and chat_id:
+                if bot_type == BotType.BUYER:
+                    return self.buyer_workflow.handle_cancel(user, chat_id)
+                elif bot_type == BotType.SELLER:
+                    return self.seller_workflow.handle_cancel(user, chat_id)
+
+            elif command == "help" and user and chat_id:
+                return self.handle_help(user, chat_id, args)
+
+        # 4. Route Interactive / Menu Text Messages
+        if user and chat_id and text:
+            if bot_type == BotType.BUYER:
+                return self.buyer_workflow.handle_text(user, chat_id, text)
+            elif bot_type == BotType.SELLER:
+                return self.seller_workflow.handle_text(user, chat_id, text)
 
         return self.handle_text_message(user, chat_id, text)
-
-    def _route_command(
-        self,
-        user: Optional[TelegramUser],
-        chat_id: int,
-        command: str,
-        args: str,
-    ) -> Dict[str, Any]:
-        """Route recognized commands to their dedicated handler functions."""
-        if command == "start":
-            return self.handle_start(user, chat_id, args)
-        elif command == "help":
-            return self.handle_help(user, chat_id, args)
-        elif command == "register" and user:
-            return self.seller_workflow.start_registration(user, chat_id)
-        elif command == "list" and user:
-            return self.seller_workflow.start_listing_wizard(user, chat_id)
-        else:
-            return self.handle_unknown_command(user, chat_id, command)
 
     def handle_start(
         self,
@@ -122,30 +130,14 @@ class TelegramDispatcher:
         chat_id: int,
         args: str,
     ) -> Dict[str, Any]:
-        """Handle the /start command customized for bot type."""
+        """Unified fallback /start command."""
         user_name = user.first_name if user and user.first_name else "Guest"
-        bot_type = getattr(self.bot_config, "bot_type", "UNIFIED")
-
-        if bot_type == BotType.SELLER and user:
-            return self.seller_workflow.handle_start(user, chat_id)
-        elif bot_type == BotType.BUYER:
-            text = (
-                f"Hello {user_name}! 👋\n\n"
-                f"Welcome to <b>{self.tenant.name} Bidding Bot</b>.\n"
-                f"Official currency: <b>{self.tenant.currency}</b>\n\n"
-                "Use this bot to browse live auctions and place real-time bids:\n"
-                "• /auctions - Browse active auction lots\n"
-                "• /bid - View lot bidding instructions\n"
-                "• /wallet - Check account balance\n"
-                "• /help - View bidding commands"
-            )
-        else:
-            text = (
-                f"Hello {user_name}! 👋\n\n"
-                f"Welcome to <b>{self.tenant.name}</b> auction bot.\n"
-                f"Official currency: <b>{self.tenant.currency}</b> | Timezone: <b>{self.tenant.timezone}</b>\n\n"
-                "Use /help to view available commands."
-            )
+        text = (
+            f"Hello {user_name}! 👋\n\n"
+            f"Welcome to <b>{self.tenant.name}</b> auction bot.\n"
+            f"Official currency: <b>{self.tenant.currency}</b> | Timezone: <b>{self.tenant.timezone}</b>\n\n"
+            "Use /help to view available commands."
+        )
 
         try:
             self.telegram_service.send_message(chat_id=chat_id, text=text)
@@ -167,40 +159,12 @@ class TelegramDispatcher:
         args: str,
     ) -> Dict[str, Any]:
         """Handle the /help command customized for bot type."""
-        bot_type = getattr(self.bot_config, "bot_type", "UNIFIED")
-
-        if bot_type == BotType.SELLER:
-            text = (
-                f"<b>{self.tenant.name} Seller Support & Commands</b>\n\n"
-                "Commands:\n"
-                "• /start - Restart the seller session\n"
-                "• /register - Register as an approved seller\n"
-                "• /list - Create new fish lot listing\n"
-                "• /help - View this help documentation\n\n"
-                f"For support, contact your regional {self.tenant.name} staff."
-            )
-        elif bot_type == BotType.BUYER:
-            text = (
-                f"<b>{self.tenant.name} Bidding Support & Commands</b>\n\n"
-                "Commands:\n"
-                "• /start - Restart the bidding session\n"
-                "• /auctions - View active auctions\n"
-                "• /bid &lt;lot_id&gt; &lt;amount&gt; - Place bid\n"
-                "• /wallet - View escrow wallet\n"
-                "• /help - View this help documentation\n\n"
-                f"For support, contact your regional {self.tenant.name} staff."
-            )
-        else:
-            text = (
-                f"<b>{self.tenant.name} Support & Commands</b>\n\n"
-                "Available commands:\n"
-                "• /start - Restart the bot and view tenant welcome\n"
-                "• /help - View this help documentation\n\n"
-                f"For inquiries, contact your regional {self.tenant.name} team."
-            )
-
+        helpdesk_details = (
+            getattr(self.tenant, "metadata", {}).get("helpdesk_details")
+            or f"Contact {self.tenant.name} support for inquiries."
+        )
         try:
-            self.telegram_service.send_message(chat_id=chat_id, text=text)
+            self.telegram_service.send_message(chat_id=chat_id, text=str(helpdesk_details))
         except Exception as exc:
             logger.warning("Could not send /help message: %s", exc)
 
@@ -254,9 +218,10 @@ class TelegramDispatcher:
         callback_id = callback_data.get("id")
         data_payload = callback_data.get("data", "")
         chat_id = callback_data.get("message", {}).get("chat", {}).get("id") or (user.chat_id if user else None)
+        bot_type = getattr(self.bot_config, "bot_type", BotType.UNIFIED)
 
-        # Always acknowledge callback query to dismiss loading state on client
-        if callback_id:
+        # Always acknowledge callback query to dismiss loading state on client if not already handled
+        if callback_id and not (data_payload.startswith("wishlist_") or data_payload.startswith("remove_from_wishlist_") or data_payload.startswith("delete_")):
             try:
                 self.telegram_service.answer_callback_query(
                     callback_query_id=callback_id,
@@ -265,11 +230,16 @@ class TelegramDispatcher:
             except Exception as exc:
                 logger.warning("Could not answer callback query %s: %s", callback_id, exc)
 
-        # Route through seller workflow if applicable
+        # Route through appropriate workflow
         if user and chat_id:
-            seller_res = self.seller_workflow.handle_callback(user, chat_id, data_payload)
-            if seller_res.get("handled"):
-                return seller_res
+            if bot_type == BotType.BUYER:
+                buyer_res = self.buyer_workflow.handle_callback(user, chat_id, callback_id, data_payload)
+                if buyer_res.get("handled"):
+                    return buyer_res
+            elif bot_type == BotType.SELLER:
+                seller_res = self.seller_workflow.handle_callback(user, chat_id, callback_id, data_payload)
+                if seller_res.get("handled"):
+                    return seller_res
 
         return {
             "handled": True,
@@ -278,4 +248,3 @@ class TelegramDispatcher:
             "callback_id": callback_id,
             "data": data_payload,
         }
-

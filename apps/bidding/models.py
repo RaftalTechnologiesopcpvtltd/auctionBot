@@ -227,3 +227,38 @@ class Bid(TenantOwnedModel):
 
     def __str__(self):
         return f"${self.amount} on Auction #{self.auction_id} by {self.bidder_name or self.bidder_id}"
+
+
+class BuyerWishlist(TenantOwnedModel):
+    """Items favorited/wishlisted by a buyer."""
+
+    telegram_user = models.ForeignKey(
+        "telegram_engine.TelegramUser",
+        on_delete=models.CASCADE,
+        related_name="wishlist_items",
+        help_text="User who added the item to their favorites.",
+    )
+    listing = models.ForeignKey(
+        "listings.Listing",
+        on_delete=models.CASCADE,
+        related_name="wishlist_entries",
+        help_text="Favorited catalog listing.",
+    )
+
+    class Meta:
+        verbose_name = "Buyer Wishlist Item"
+        verbose_name_plural = "Buyer Wishlist Items"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "telegram_user", "listing"],
+                name="unique_tenant_user_listing_wishlist",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "telegram_user"]),
+        ]
+
+    def __str__(self):
+        return f"Wishlist item #{self.listing_id} for user #{self.telegram_user_id}"
+

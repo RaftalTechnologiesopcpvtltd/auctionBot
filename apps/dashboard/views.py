@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import timedelta
 from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponseForbidden
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib import messages
@@ -9,7 +10,8 @@ from django.db.models import Sum, Max, Count, Q
 from django.core.paginator import Paginator
 from django.views.decorators.http import require_POST
 
-from apps.tenants.models import Tenant
+from apps.tenants.models import Tenant, TenantMembership, TenantRole
+from apps.tenants.security import is_platform_admin, is_tenant_admin, can_switch_tenant
 from apps.listings.models import Listing, ListingStatus, ListingType
 from apps.bidding.models import Auction, AuctionStatus, Bid
 from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, TelegramUpdateLog
@@ -66,7 +68,14 @@ def logout_view(request):
 
 @dashboard_auth_required
 def switch_tenant_view(request, tenant_id):
-    """Switch the current active tenant context in session."""
+    """Switch the current active tenant context in session.
+
+    SECURITY RULE: Only platform administrators are permitted to switch tenant context.
+    Any non-platform user attempt must be rejected with 403 Forbidden.
+    """
+    if not can_switch_tenant(request.user):
+        return HttpResponseForbidden("Permission denied: Only platform administrators are permitted to switch tenant context.")
+
     tenant = get_object_or_404(Tenant, id=tenant_id, is_active=True)
     request.session["active_tenant_id"] = tenant.id
     messages.success(request, f"Switched context to tenant: {tenant.name} ({tenant.code})")
@@ -433,23 +442,46 @@ def sellers_list_view(request):
 
 @dashboard_auth_required
 def users_list_view(request):
-    """Staff & Admin users management matching screen 2.jpeg."""
+    """Staff & Admin users management matching screen 2.jpeg.
+    Strictly isolated per tenant unless user is a platform administrator.
+    """
+    tenant = request.tenant
+
     if request.method == "POST":
+        if not (is_platform_admin(request.user) or is_tenant_admin(request.user, tenant)):
+            return HttpResponseForbidden("Permission denied: Only administrators may create users.")
+
         name = request.POST.get("name", "").strip()
         email = request.POST.get("email", "").strip()
         password = request.POST.get("password", "").strip()
         role = request.POST.get("role", "staff").lower()
 
+        # Only platform admins can assign owner / platform admin role
+        if role in ("owner", "platform_admin") and not is_platform_admin(request.user):
+            return HttpResponseForbidden("Permission denied: Only platform administrators may create platform owners.")
+
         if email and password:
             try:
                 username = request.POST.get("username", "").strip() or email.split("@")[0]
+                is_platform = (role == "owner" and is_platform_admin(request.user))
                 user = User.objects.create_user(
                     username=username,
                     email=email,
                     password=password,
                     first_name=name,
                     is_staff=True,
-                    is_superuser=(role == "owner"),
+                    is_superuser=is_platform,
+                )
+
+                membership_role = (
+                    TenantRole.PLATFORM_ADMIN if is_platform
+                    else (TenantRole.TENANT_ADMIN if role in ("admin", "manager") else TenantRole.TENANT_STAFF)
+                )
+                TenantMembership.objects.create(
+                    user=user,
+                    tenant=tenant,
+                    role=membership_role,
+                    is_active=True
                 )
                 messages.success(request, f"Created new {role.title()} user: {user.username}")
             except Exception as e:
@@ -458,7 +490,15 @@ def users_list_view(request):
             messages.error(request, "Email and password are required.")
         return redirect("dashboard:users_list")
 
-    users_qs = User.objects.all().order_by("-date_joined")
+    if is_platform_admin(request.user):
+        users_qs = User.objects.all().order_by("-date_joined")
+    else:
+        tenant_user_ids = TenantMembership.objects.filter(
+            tenant=tenant,
+            is_active=True
+        ).values_list("user_id", flat=True)
+        users_qs = User.objects.filter(id__in=tenant_user_ids).order_by("-date_joined")
+
     total_users = users_qs.count()
     active_users = users_qs.filter(is_active=True).count()
     admins_count = users_qs.filter(is_superuser=True).count()
@@ -687,8 +727,13 @@ def transaction_detail_view(request, transaction_id):
 @dashboard_auth_required
 @require_POST
 def transaction_refund_action(request, transaction_id):
-    """Issue a refund for a transaction via Phase 06 finance service."""
+    """Issue a refund for a transaction via Phase 06 finance service.
+    Requires Tenant Admin or Platform Admin authorization.
+    """
     tenant = request.tenant
+    if not (is_platform_admin(request.user) or is_tenant_admin(request.user, tenant)):
+        return HttpResponseForbidden("Permission denied: Financial refunds require tenant admin privileges.")
+
     txn = get_object_or_404(LedgerTransaction, id=transaction_id, tenant=tenant)
     reason = request.POST.get("reason", "Admin dashboard refund")
 
@@ -708,8 +753,13 @@ def transaction_refund_action(request, transaction_id):
 @dashboard_auth_required
 @require_POST
 def transaction_reverse_action(request, transaction_id):
-    """Issue a reversal for a transaction via Phase 06 finance service."""
+    """Issue a reversal for a transaction via Phase 06 finance service.
+    Requires Tenant Admin or Platform Admin authorization.
+    """
     tenant = request.tenant
+    if not (is_platform_admin(request.user) or is_tenant_admin(request.user, tenant)):
+        return HttpResponseForbidden("Permission denied: Financial reversals require tenant admin privileges.")
+
     txn = get_object_or_404(LedgerTransaction, id=transaction_id, tenant=tenant)
     reason = request.POST.get("reason", "Admin dashboard reversal")
 
@@ -749,6 +799,9 @@ def business_settings_view(request):
     """Business & tenant profile settings matching WhatsApp Image 2026-09-24 at 04.12.10.jpeg."""
     tenant = request.tenant
     if request.method == "POST":
+        if not (is_platform_admin(request.user) or is_tenant_admin(request.user, tenant)):
+            return HttpResponseForbidden("Permission denied: Modifying business settings requires tenant admin privileges.")
+
         name = request.POST.get("name", "").strip()
         country = request.POST.get("country", "").strip()
         timezone_val = request.POST.get("timezone", "").strip()

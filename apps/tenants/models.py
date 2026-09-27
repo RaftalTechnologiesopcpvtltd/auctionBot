@@ -141,3 +141,63 @@ class TenantOwnedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class TenantRole(models.TextChoices):
+    PLATFORM_ADMIN = "PLATFORM_ADMIN", "Platform Administrator"
+    TENANT_ADMIN = "TENANT_ADMIN", "Tenant Administrator"
+    TENANT_STAFF = "TENANT_STAFF", "Tenant Staff"
+
+
+class TenantMembership(models.Model):
+    """Associates an authenticated User with a Tenant and administrative role."""
+
+    user = models.ForeignKey(
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="tenant_memberships",
+        help_text="User belonging to the tenant.",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        help_text="Tenant organization.",
+    )
+    role = models.CharField(
+        max_length=32,
+        choices=TenantRole.choices,
+        default=TenantRole.TENANT_STAFF,
+        db_index=True,
+        help_text="Administrative role within the tenant.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Whether this membership is active.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when the membership was granted.",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when the membership was last updated.",
+    )
+
+    class Meta:
+        verbose_name = "Tenant Membership"
+        verbose_name_plural = "Tenant Memberships"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "tenant"],
+                name="unique_user_tenant_membership",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "is_active", "role"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.tenant.name} ({self.role})"
+

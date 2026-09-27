@@ -49,6 +49,9 @@ def close_auction_task(
             "winner_id": auction.winner_id,
             "winning_price": str(auction.winning_price) if auction.winning_price else None,
         }
+    except (Auction.DoesNotExist, Tenant.DoesNotExist) as e:
+        logger.error("Auction or Tenant does not exist or failed tenant isolation check: %s", e)
+        return {"status": "error", "error": "tenant_or_auction_not_found"}
     except Exception as exc:
         logger.error(
             "Error closing Auction #%s on attempt %s/%s: %s",

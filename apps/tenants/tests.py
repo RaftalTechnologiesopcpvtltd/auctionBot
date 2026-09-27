@@ -299,3 +299,96 @@ class MigrationAndSystemCheckTest(TestCase):
             0,
             f"Unapplied model changes detected:\n{result.stdout}\n{result.stderr}",
         )
+
+
+class TenantMembershipSecurityTest(TestCase):
+    """Unit tests for TenantMembership model and apps.tenants.security authorization functions."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from apps.tenants.models import TenantMembership, TenantRole
+        from apps.tenants.security import (
+            is_platform_admin,
+            is_tenant_admin,
+            is_tenant_staff,
+            can_switch_tenant,
+            get_user_tenants,
+            resolve_requested_tenant,
+            enforce_tenant_object_access,
+        )
+
+        self.tenant_a = Tenant.objects.create(
+            name="Alpha Corp", slug="alpha", code="AL", country="SG", timezone="UTC", currency="SGD"
+        )
+        self.tenant_b = Tenant.objects.create(
+            name="Beta Corp", slug="beta", code="BE", country="JP", timezone="UTC", currency="JPY"
+        )
+
+        self.superuser = User.objects.create_superuser("root_admin", "root@platform.io", "pass123")
+        self.user_a_admin = User.objects.create_user("a_admin", "a_admin@alpha.io", "pass123", is_staff=True)
+        TenantMembership.objects.create(user=self.user_a_admin, tenant=self.tenant_a, role=TenantRole.TENANT_ADMIN)
+
+        self.user_a_staff = User.objects.create_user("a_staff", "a_staff@alpha.io", "pass123", is_staff=True)
+        TenantMembership.objects.create(user=self.user_a_staff, tenant=self.tenant_a, role=TenantRole.TENANT_STAFF)
+
+        self.user_b_admin = User.objects.create_user("b_admin", "b_admin@beta.io", "pass123", is_staff=True)
+        TenantMembership.objects.create(user=self.user_b_admin, tenant=self.tenant_b, role=TenantRole.TENANT_ADMIN)
+
+    def test_platform_admin_recognition(self):
+        """Superuser is always recognized as platform admin and can switch tenants."""
+        from apps.tenants.security import is_platform_admin, can_switch_tenant
+        self.assertTrue(is_platform_admin(self.superuser))
+        self.assertTrue(can_switch_tenant(self.superuser))
+        self.assertFalse(is_platform_admin(self.user_a_admin))
+        self.assertFalse(can_switch_tenant(self.user_a_admin))
+
+    def test_tenant_admin_and_staff_roles(self):
+        """Role helpers accurately distinguish between tenant admin and staff."""
+        from apps.tenants.security import is_tenant_admin, is_tenant_staff
+        # Admin has admin rights and staff rights
+        self.assertTrue(is_tenant_admin(self.user_a_admin, self.tenant_a))
+        self.assertTrue(is_tenant_staff(self.user_a_admin, self.tenant_a))
+        # Staff has staff rights but NOT admin rights
+        self.assertFalse(is_tenant_admin(self.user_a_staff, self.tenant_a))
+        self.assertTrue(is_tenant_staff(self.user_a_staff, self.tenant_a))
+
+        # Cross-tenant role check returns False
+        self.assertFalse(is_tenant_admin(self.user_a_admin, self.tenant_b))
+        self.assertFalse(is_tenant_staff(self.user_a_staff, self.tenant_b))
+
+    def test_resolve_requested_tenant(self):
+        """Platform admin can resolve any tenant; Tenant admin cannot resolve foreign tenant."""
+        from django.core.exceptions import PermissionDenied
+        from apps.tenants.security import resolve_requested_tenant
+
+        # Platform admin requested Tenant B -> allowed
+        resolved = resolve_requested_tenant(self.superuser, self.tenant_b.id)
+        self.assertEqual(resolved, self.tenant_b)
+
+        # Tenant A admin requesting Tenant A -> allowed
+        resolved_a = resolve_requested_tenant(self.user_a_admin, self.tenant_a.id)
+        self.assertEqual(resolved_a, self.tenant_a)
+
+        # Tenant A admin requesting Tenant B -> PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            resolve_requested_tenant(self.user_a_admin, self.tenant_b.id)
+
+    def test_enforce_tenant_object_access(self):
+        """enforce_tenant_object_access raises Http404 on cross-tenant mismatch to avoid enumeration."""
+        from django.http import Http404
+        from apps.tenants.security import enforce_tenant_object_access
+
+        class DummyObj:
+            def __init__(self, tenant):
+                self.tenant = tenant
+
+        obj_a = DummyObj(self.tenant_a)
+        obj_b = DummyObj(self.tenant_b)
+
+        # Same tenant -> passes
+        enforce_tenant_object_access(obj_a, self.tenant_a)
+
+        # Mismatched tenant -> raises Http404
+        with self.assertRaises(Http404):
+            enforce_tenant_object_access(obj_b, self.tenant_a)
+

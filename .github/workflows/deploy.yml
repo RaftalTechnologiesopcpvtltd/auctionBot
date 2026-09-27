@@ -1,0 +1,73 @@
+name: AuctionBot Deploy
+
+on:
+  workflow_run:
+    workflows: ["AuctionBot CI"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      target_commit:
+        description: "Target Git commit / tag to deploy (leave blank for latest main)"
+        required: false
+        default: ""
+
+jobs:
+  deploy:
+    name: Deploy to Live Server
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Validate Deployment Configuration
+        run: |
+          if [ -z "${{ secrets.SERVER_HOST }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "::warning ::Deployment credentials (SERVER_HOST / SSH_PRIVATE_KEY) are not configured in GitHub Secrets."
+            echo "Skipping live deployment until repository secrets are provisioned."
+            exit 0
+          fi
+
+      - name: Deploy via SSH
+        if: ${{ secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER || 'root' }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 120s
+          script: |
+            set -euo pipefail
+            echo "=== [1/6] Navigating to deployment directory ==="
+            DEPLOY_DIR="/opt/auctionbot"
+            if [ ! -d "$DEPLOY_DIR" ]; then
+              echo "Initializing deployment directory at $DEPLOY_DIR..."
+              mkdir -p "$DEPLOY_DIR"
+              git clone https://github.com/RaftalTechnologiesopcpvtltd/auctionBot.git "$DEPLOY_DIR"
+            fi
+            cd "$DEPLOY_DIR"
+
+            echo "=== [2/6] Fetching latest codebase ==="
+            git fetch origin
+            TARGET_REF="${{ github.event.inputs.target_commit || 'origin/main' }}"
+            git checkout "$TARGET_REF"
+
+            echo "=== [3/6] Building production containers ==="
+            docker compose -f docker-compose.prod.yml build
+
+            echo "=== [4/6] Starting services ==="
+            docker compose -f docker-compose.prod.yml up -d
+
+            echo "=== [5/6] Running database migrations & collectstatic ==="
+            docker compose -f docker-compose.prod.yml exec -T web python manage.py migrate --noinput
+            docker compose -f docker-compose.prod.yml exec -T web python manage.py collectstatic --noinput
+
+            echo "=== [6/6] Verifying application health ==="
+            sleep 3
+            docker compose -f docker-compose.prod.yml exec -T web python -c "
+            import urllib.request
+            resp = urllib.request.urlopen('http://127.0.0.1:8000/health/')
+            assert resp.getcode() == 200, f'Health check returned {resp.getcode()}'
+            print('Production health endpoint: HEALTHY')
+            "
+            echo "Deployment completed successfully."

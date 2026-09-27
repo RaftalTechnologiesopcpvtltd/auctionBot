@@ -23,9 +23,13 @@ ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.s
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SESSION_COOKIE_SECURE", "True").lower() in ("true", "1", "yes")
+CSRF_COOKIE_SECURE = os.environ.get("DJANGO_CSRF_COOKIE_SECURE", "True").lower() in ("true", "1", "yes")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+csrf_trusted_raw = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
+if csrf_trusted_raw:
+    CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted_raw.split(",") if origin.strip()]
 
 # Production Logging (Console stream for containerized / 12-factor log management)
 LOGGING["root"]["level"] = "WARNING"  # noqa: F405

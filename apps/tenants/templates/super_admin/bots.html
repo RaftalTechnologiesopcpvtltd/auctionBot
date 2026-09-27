@@ -89,8 +89,11 @@
                             </label>
 
                             <div class="flex items-center space-x-2">
-                                <button type="button" onclick="testBotConnection({{ row.seller_bot.id }}, this)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                                <button type="button" onclick="testBotConnection({{ row.seller_bot.id }}, this)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
                                     Test Connection
+                                </button>
+                                <button type="button" onclick="setBotWebhook({{ row.seller_bot.id }}, this)" class="px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 text-xs font-semibold border border-emerald-500/40 transition-colors">
+                                    Set Webhook
                                 </button>
                                 <button type="submit" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors">
                                     Save
@@ -145,8 +148,11 @@
                             </label>
 
                             <div class="flex items-center space-x-2">
-                                <button type="button" onclick="testBotConnection({{ row.bidding_bot.id }}, this)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                                <button type="button" onclick="testBotConnection({{ row.bidding_bot.id }}, this)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
                                     Test Connection
+                                </button>
+                                <button type="button" onclick="setBotWebhook({{ row.bidding_bot.id }}, this)" class="px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 text-xs font-semibold border border-emerald-500/40 transition-colors">
+                                    Set Webhook
                                 </button>
                                 <button type="submit" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors">
                                     Save
@@ -188,6 +194,34 @@
             } else {
                 resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-red-500/20 text-red-300 border border-red-500/40";
                 resultDiv.innerHTML = `<strong>Failed:</strong> ${data.error}`;
+            }
+        } catch (err) {
+            resultDiv.classList.remove('hidden');
+            resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-red-500/20 text-red-300 border border-red-500/40";
+            resultDiv.innerHTML = `<strong>Error:</strong> Network error while reaching server.`;
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    async function setBotWebhook(botId, btn) {
+        const resultDiv = document.getElementById(`test-result-${botId}`);
+        const originalText = btn.innerText;
+        btn.innerText = "Registering...";
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`/super-admin/bots/${botId}/set-webhook/`);
+            const data = await response.json();
+            resultDiv.classList.remove('hidden');
+
+            if (data.ok) {
+                resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+                resultDiv.innerHTML = `<strong>Webhook Registered!</strong> Telegram response: ${data.description || 'Success'}`;
+            } else {
+                resultDiv.className = "text-[11px] p-2.5 rounded-xl mt-2 bg-red-500/20 text-red-300 border border-red-500/40";
+                resultDiv.innerHTML = `<strong>Registration Failed:</strong> ${data.error || data.description}`;
             }
         } catch (err) {
             resultDiv.classList.remove('hidden');

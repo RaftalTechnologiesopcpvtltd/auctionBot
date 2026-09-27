@@ -13,4 +13,6 @@ urlpatterns = [
     path("bots/", views.super_admin_bots_view, name="bots"),
     path("bots/<int:bot_id>/update/", views.super_admin_update_bot, name="update_bot"),
     path("bots/<int:bot_id>/test/", views.super_admin_test_bot, name="test_bot"),
+    path("bots/<int:bot_id>/set-webhook/", views.super_admin_set_webhook, name="set_webhook"),
 ]
+

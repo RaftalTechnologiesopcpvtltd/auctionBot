@@ -208,8 +208,8 @@ def super_admin_bots_view(request):
             "tenant": t,
             "seller_bot": seller_bot,
             "bidding_bot": bidding_bot,
-            "seller_webhook": f"http://{t.slug}.auctionbot.shop{seller_bot.webhook_path}",
-            "bidding_webhook": f"http://{t.slug}.auctionbot.shop{bidding_bot.webhook_path}",
+            "seller_webhook": f"https://{t.slug}.auctionbot.shop{seller_bot.webhook_path}",
+            "bidding_webhook": f"https://{t.slug}.auctionbot.shop{bidding_bot.webhook_path}",
         })
 
     return render(request, "super_admin/bots.html", {
@@ -260,3 +260,25 @@ def super_admin_test_bot(request, bot_id):
             return JsonResponse({"ok": False, "error": info.get("description", "Unknown Telegram API error")})
     except Exception as exc:
         return JsonResponse({"ok": False, "error": str(exc)})
+
+
+@super_admin_required
+def super_admin_set_webhook(request, bot_id):
+    """Registers bot webhook directly with Telegram."""
+    bot = get_object_or_404(TelegramBotConfig, id=bot_id)
+    token = bot.get_token()
+    if not token:
+        return JsonResponse({"ok": False, "error": "No bot token configured."})
+
+    webhook_url = f"https://{bot.tenant.slug}.auctionbot.shop{bot.webhook_path}"
+    try:
+        service = TelegramService(bot)
+        res = service.set_webhook(
+            url=webhook_url,
+            secret_token=bot.webhook_secret_token or None,
+            allowed_updates=["message", "callback_query"],
+        )
+        return JsonResponse(res)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)})
+

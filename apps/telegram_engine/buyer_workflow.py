@@ -390,6 +390,17 @@ class BuyerWorkflow:
         callback_id: str,
     ) -> Dict[str, Any]:
         """Displays all open auctions for this tenant."""
+        from services.listings import ensure_active_auction_for_listing
+
+        # Auto-ensure any approved AUCTION listings have active Auction models
+        approved_listings = Listing.objects.filter(
+            tenant=self.tenant,
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+        )
+        for item in approved_listings:
+            ensure_active_auction_for_listing(item)
+
         auctions = (
             Auction.objects.filter(
                 tenant=self.tenant,

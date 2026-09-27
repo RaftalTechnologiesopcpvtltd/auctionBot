@@ -88,8 +88,69 @@ def attach_listing_image(
     return img
 
 
+def ensure_active_auction_for_listing(listing: Listing):
+    """Ensures an active Auction record exists for an approved AUCTION listing."""
+    from decimal import Decimal
+    from django.utils import timezone
+    from apps.bidding.models import Auction, AuctionStatus
+
+    if listing.listing_type != ListingType.AUCTION or listing.status != ListingStatus.APPROVED:
+        return None
+
+    auction = Auction.objects.filter(listing=listing).first()
+    if auction:
+        if auction.status != AuctionStatus.ACTIVE:
+            auction.status = AuctionStatus.ACTIVE
+            auction.save(update_fields=["status", "updated_at"])
+        return auction
+
+    starting_price = Decimal("10.00")
+    min_bid = Decimal("5.00")
+    buy_now_price = None
+
+    if isinstance(listing.metadata, dict):
+        if listing.metadata.get("starting_price"):
+            try:
+                starting_price = Decimal(str(listing.metadata["starting_price"]))
+            except Exception:
+                pass
+        if listing.metadata.get("min_bid"):
+            try:
+                min_bid = Decimal(str(listing.metadata["min_bid"]))
+            except Exception:
+                pass
+        bn = listing.metadata.get("buy_now_price") or listing.metadata.get("buynow_price") or listing.metadata.get("auto_accept_price")
+        if bn:
+            try:
+                bn_val = Decimal(str(bn))
+                if bn_val > starting_price:
+                    buy_now_price = bn_val
+            except Exception:
+                pass
+
+    now = timezone.now()
+    days = 3
+    if isinstance(listing.metadata, dict) and listing.metadata.get("auction_days"):
+        try:
+            days = int(listing.metadata["auction_days"])
+        except Exception:
+            pass
+
+    return Auction.objects.create(
+        tenant=listing.tenant,
+        listing=listing,
+        starting_price=starting_price,
+        bid_increment=min_bid,
+        current_price=Decimal("0.00"),
+        buy_now_price=buy_now_price,
+        start_at=now - timezone.timedelta(minutes=5),
+        end_at=now + timezone.timedelta(days=days),
+        status=AuctionStatus.ACTIVE,
+    )
+
+
 def approve_listing(listing: Listing, approved_by: Optional[str] = None) -> Listing:
-    """Approves a pending listing for operational scheduling and notifies the seller."""
+    """Approves a pending listing for operational scheduling and activates an auction if applicable."""
     if listing.status != ListingStatus.PENDING:
         raise ValidationError(f"Cannot approve listing with status '{listing.status}'. Must be PENDING.")
     listing.status = ListingStatus.APPROVED
@@ -98,6 +159,10 @@ def approve_listing(listing: Listing, approved_by: Optional[str] = None) -> List
         listing.save(update_fields=["status", "metadata", "updated_at"])
     else:
         listing.save(update_fields=["status", "updated_at"])
+
+    # If this is an AUCTION listing, automatically create & activate the Auction
+    if listing.listing_type == ListingType.AUCTION:
+        ensure_active_auction_for_listing(listing)
 
     _notify_seller(
         listing,

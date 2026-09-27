@@ -30,9 +30,12 @@ This document describes the architectural foundation established across **Phase 
 | **Core Domain Models** | **Implemented** | Phase 03 | `Listing`, `Auction`, `Bid` with strict Decimal monetary fields |
 | **Domain Services Layer** | **Implemented** | Phase 03 | `services/listings.py`, `services/auctions.py`, `services/bids.py` |
 | **Domain Lifecycle State Machines** | **Implemented** | Phase 03 | `ListingStatus`, `AuctionStatus` typed TextChoices transitions |
+| **Telegram Engine Foundation** | **Implemented** | Phase 04 | Webhook router, tenant resolution, secret tokens, dispatcher |
+| **Telegram Bot Configuration** | **Implemented** | Phase 04 | `TelegramBotConfig` with Fernet-encrypted bot tokens at rest |
+| **Telegram User Identity & Idempotency** | **Implemented** | Phase 04 | `TelegramUser` (tenant-scoped) & `TelegramUpdateLog` deduplication |
+| **Telegram Service Abstraction** | **Implemented** | Phase 04 | `TelegramService(tenant)` with mockable HTTP client |
 | *Tenant Routing Middleware* | *Deferred* | Future Phase | Subdomain and header-based tenant resolution |
 | *User / Tenant Membership* | *Deferred* | Future Phase | `TenantMembership` junction model and role permissions |
-| *Telegram Engine / Bots* | *Deferred* | Phase 04 | Webhook router, command dispatcher, bot tokens |
 | *Bidding Engine & Concurrency* | *Deferred* | Phase 05 | Anti-sniping, real-time bid competition, Redis locks |
 | *Auction Closing Workers* | *Deferred* | Phase 05 | Celery-based scheduled/asynchronous auction finalization |
 | *Wallet & Accounting* | *Deferred* | Phase 06 | Double-entry ledger, deposits, commissions, refunds |
@@ -251,8 +254,78 @@ Represents an immutable financial bid placed by a bidder.
 The following items are intentionally excluded from Phase 03 to maintain clean boundaries:
 1. **Concurrent Bidding Engine & Distributed Locks**: High-concurrency Redis mutexes, atomic Lua scripts, and anti-sniping dynamic extensions are deferred to Phase 05.
 2. **Asynchronous Auction Closing Workers**: Celery beat schedules and polling workers for auto-closing expired auctions are deferred to Phase 05.
-3. **Telegram Handlers & Dispatchers**: Telegram bot polling, webhooks, and conversational state machines are deferred to Phase 04.
-4. **Wallets & Financial Settlement**: Double-entry ledger, deposits, payment gateway webhooks, and seller disbursements are deferred to Phase 06.
+3. **Wallets & Financial Settlement**: Double-entry ledger, deposits, payment gateway webhooks, and seller disbursements are deferred to Phase 06.
+
+---
+
+## Multi-Tenant Telegram Engine (Phase 04)
+
+### 1. Ingestion Pipeline & Architectural Flow
+The Telegram Engine decouples incoming messaging updates from core domain models using a strictly layered processing pipeline:
+
+```text
+Telegram Update (HTTPS POST)
+            ↓
+  Tenant Resolution (/telegram/webhook/<tenant_slug>/<bot_type>/)
+            ↓
+  Webhook Secret Verification (X-Telegram-Bot-Api-Secret-Token)
+            ↓
+  Idempotency Deduplication (TelegramUpdateLog)
+            ↓
+  Update Dispatcher (TelegramDispatcher)
+            ↓
+  User Profile Synchronization (TelegramUser)
+            ↓
+  Command & Callback Routers (/start, /help, callback_query)
+            ↓
+  Application Services (Decoupled Orchestration)
+            ↓
+  Domain Services (services/listings.py, services/bids.py)
+            ↓
+  PostgreSQL Relational Layer
+```
+
+### 2. Tenant Resolution
+- Webhook endpoints explicitly encode tenant routing:
+  - Default Unified: `POST /telegram/webhook/<slug:tenant_slug>/`
+  - Typed Bot: `POST /telegram/webhook/<slug:tenant_slug>/<str:bot_type>/`
+- Routing deterministically maps to an active `Tenant` record. User-supplied parameters or client-side country selectors are never trusted as security boundaries.
+
+### 3. Telegram Configuration & Token Security (`TelegramBotConfig`)
+- Subclasses `TenantOwnedModel` with `on_delete=models.PROTECT`.
+- **Encrypted Token Storage**: Tokens are encrypted at rest using standard `cryptography.fernet.Fernet` (AES-128-CBC + HMAC-SHA256) keyed by SHA-256 derived from `settings.SECRET_KEY` or `TELEGRAM_TOKEN_ENCRYPTION_KEY`.
+- **Environment Override**: Supports 12-factor cloud deployments via `token_env_var` (e.g. `CYG_TELEGRAM_BOT_TOKEN`), overriding database ciphertext.
+- **Admin Masking**: Tokens are never displayed in plaintext or returned in unmasked serializers (`masked_token` returns `1234...9876`).
+
+### 4. Webhook Security Foundation
+- **Secret Token Header**: Evaluates `X-Telegram-Bot-Api-Secret-Token` matching the tenant's `webhook_secret_token`. Mismatches immediately return `403 Forbidden`.
+- **Strict Method Enforcement**: Rejects non-POST requests with `405 Method Not Allowed`.
+- **Sanitized Errors**: Does not leak stack traces or internal configuration to external callers.
+
+### 5. Idempotency & Deduplication (`TelegramUpdateLog`)
+- Telegram webhooks may retry delivery during network blips or timeouts.
+- `TelegramUpdateLog` enforces a composite unique constraint on `(tenant, update_id)`.
+- If an update has already been registered for the tenant, the endpoint returns `{"status": "duplicate"}` with HTTP 200 immediately, suppressing duplicate commands, bids, or notifications.
+
+### 6. Tenant-Scoped User Identity (`TelegramUser`)
+- Telegram users are identified externally by stable 64-bit integer `telegram_user_id`.
+- Identity is strictly tenant-scoped via composite unique constraint: `(tenant, telegram_user_id)`.
+- A user interacting with CYG Malaysia (`Tenant MY`) and AquaBid Australia (`Tenant AU`) maintains separate preferences, roles, and profiles for each regional marketplace.
+
+### 7. Telegram Service Abstraction (`services.telegram.TelegramService`)
+- Encapsulates low-level HTTP Bot API communication:
+  - `send_message(chat_id, text, parse_mode, reply_markup)`
+  - `edit_message_text(chat_id, message_id, text, parse_mode, reply_markup)`
+  - `answer_callback_query(callback_query_id, text, show_alert)`
+- Bound to a tenant's bot configuration (`TelegramService(tenant)`).
+- Mockable HTTP adapter ensures zero live network requests occur during automated test execution.
+
+### 8. Boundaries and Deferred Capabilities
+The following capabilities are deferred to future phases:
+1. **Long Polling & Background Daemons**: Strictly rejected in favor of webhooks. No long-running polling processes.
+2. **Conversational FSMs & Seller Registration**: Multi-step state machines for listing registration are deferred to subsequent feature phases.
+3. **Bidding Engine Integration**: Redis distributed locking, anti-sniping dynamic extensions, and atomic concurrency are deferred to Phase 05.
+4. **Production Webhook Registration**: Registration of public domains via `setWebhook` is deferred to deployment phases.
 
 ---
 

@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.tenants.apps.TenantsConfig",
     "apps.listings.apps.ListingsConfig",
     "apps.bidding.apps.BiddingConfig",
+    "apps.telegram_engine.apps.TelegramEngineConfig",
 ]
 
 MIDDLEWARE = [

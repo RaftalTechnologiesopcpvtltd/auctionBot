@@ -16,26 +16,33 @@ jobs:
   deploy:
     name: Deploy to Live Server
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run && github.event.workflow_run.conclusion == 'success') }}
 
     steps:
       - name: Validate Deployment Configuration
+        id: check_creds
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          if [ -z "${{ secrets.SERVER_HOST }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+          if [ -z "$SERVER_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "has_creds=false" >> "$GITHUB_OUTPUT"
             echo "::warning ::Deployment credentials (SERVER_HOST / SSH_PRIVATE_KEY) are not configured in GitHub Secrets."
             echo "Skipping live deployment until repository secrets are provisioned."
-            exit 0
+          else
+            echo "has_creds=true" >> "$GITHUB_OUTPUT"
+            echo "Deployment credentials detected."
           fi
 
       - name: Deploy via SSH
-        if: ${{ secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != '' }}
+        if: steps.check_creds.outputs.has_creds == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER || 'root' }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          timeout: 120s
+          timeout: 600s
           script: |
             set -euo pipefail
             echo "=== [1/6] Navigating to deployment directory ==="
@@ -52,18 +59,24 @@ jobs:
             TARGET_REF="${{ github.event.inputs.target_commit || 'origin/main' }}"
             git checkout "$TARGET_REF"
 
-            echo "=== [3/6] Building production containers ==="
+            echo "=== [3/6] Verifying environment configuration ==="
+            if [ ! -f .env ]; then
+              echo "Creating initial .env from .env.example..."
+              cp .env.example .env
+            fi
+
+            echo "=== [4/6] Building production containers ==="
             docker compose -f docker-compose.prod.yml build
 
-            echo "=== [4/6] Starting services ==="
+            echo "=== [5/6] Starting services ==="
             docker compose -f docker-compose.prod.yml up -d
 
-            echo "=== [5/6] Running database migrations & collectstatic ==="
+            echo "=== [6/6] Running database migrations & collectstatic ==="
             docker compose -f docker-compose.prod.yml exec -T web python manage.py migrate --noinput
             docker compose -f docker-compose.prod.yml exec -T web python manage.py collectstatic --noinput
 
-            echo "=== [6/6] Verifying application health ==="
-            sleep 3
+            echo "=== Deployment Health Check ==="
+            sleep 5
             docker compose -f docker-compose.prod.yml exec -T web python -c "
             import urllib.request
             resp = urllib.request.urlopen('http://127.0.0.1:8000/health/')

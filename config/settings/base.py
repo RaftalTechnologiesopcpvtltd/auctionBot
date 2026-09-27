@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.listings.apps.ListingsConfig",
     "apps.bidding.apps.BiddingConfig",
     "apps.telegram_engine.apps.TelegramEngineConfig",
+    "apps.finance.apps.FinanceConfig",
 ]
 
 MIDDLEWARE = [

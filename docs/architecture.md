@@ -36,9 +36,9 @@ This document describes the architectural foundation established across **Phase 
 | **Telegram Service Abstraction** | **Implemented** | Phase 04 | `TelegramService(tenant)` with mockable HTTP client |
 | **Concurrent Bidding Engine** | **Implemented** | Phase 05 | PostgreSQL row locks (`select_for_update`), anti-sniping, idempotency |
 | **Asynchronous Auction Closing** | **Implemented** | Phase 05 | Celery task `bidding.close_auction_task` with idempotent finalization |
+| **Wallet & Double-Entry Ledger** | **Implemented** | Phase 06 | Double-entry ledger, deposits, debits, holds/releases/captures, refunds/reversals, reconciliation |
 | *Tenant Routing Middleware* | *Deferred* | Future Phase | Subdomain and header-based tenant resolution |
 | *User / Tenant Membership* | *Deferred* | Future Phase | `TenantMembership` junction model and role permissions |
-| *Wallet & Accounting* | *Deferred* | Phase 06 | Double-entry ledger, deposits, commissions, refunds |
 | *Dashboard UI* | *Deferred* | Phase 07 | Multi-tenant administrative and analytics portal |
 | *Legacy Data Migration* | *Deferred* | Phase 08 | Safe migration from `CYG_Aquatics_Malaysia` |
 
@@ -383,6 +383,31 @@ Concurrent Bid B (Worker 2) ──┘        │
 
 ### 7. External Side-Effect Boundary
 - External network requests (e.g. Telegram API `sendMessage`, payment webhooks) are **strictly forbidden** inside the database transaction block. All outbound side-effects must occur after the transaction has committed.
+
+---
+
+## Multi-Tenant Financial Architecture & Double-Entry Ledger (Phase 06)
+
+### 1. The Ledger As Single Source of Truth
+- The ledger is the sole authoritative record of financial state.
+- Mutable balance manipulation (`wallet.balance += amount`) is prohibited.
+- `FinancialAccount` stores materialized `available_balance` and `held_balance` that are derived strictly from atomic double-entry ledger transactions (`LedgerTransaction` and `LedgerEntry`).
+
+### 2. Double-Entry Invariants
+- Every transaction enforces $\sum \text{Debits} == \sum \text{Credits}$.
+- All entry amounts are strictly positive `Decimal(14, 2)`.
+- Asset accounts (`PLATFORM_CASH`): Normal balance is DEBIT.
+- Liability/Equity accounts (`USER_WALLET`, `ESCROW`, `PLATFORM_REVENUE`, `COMMISSION`): Normal balance is CREDIT.
+- All entries in a transaction belong to the same tenant and share the same currency.
+
+### 3. Concurrency, Locking & Idempotency
+- All balance mutations run within `transaction.atomic()`.
+- Participating account rows are locked using `select_for_update()` in deterministic sorted order (`id`) to prevent deadlocks.
+- Negative balance protection is checked under lock: overdrafts raise `InsufficientFundsError`.
+- Operations support `idempotency_key` with unique constraint `(tenant, idempotency_key)`. Concurrent race submissions safely resolve to the single created transaction.
+
+### 4. Reconciliation
+- `python manage.py reconcile_financial_accounts` audits materialized balances against the sum of historical ledger entries and reports discrepancies without silent mutation. Optional `--repair` flag corrects materialized caches to match ledger truth.
 
 ---
 

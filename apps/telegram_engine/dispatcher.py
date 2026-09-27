@@ -2,7 +2,8 @@
 import logging
 from typing import Any, Dict, Optional, Tuple
 from apps.tenants.models import Tenant
-from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, BotType
+from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, BotType, ConversationState
+from apps.telegram_engine.seller_workflow import SellerWorkflow
 from services.telegram import TelegramService
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,11 @@ class TelegramDispatcher:
         self.tenant = tenant
         self.bot_config = bot_config
         self.telegram_service = telegram_service or TelegramService(bot_config)
+        self.seller_workflow = SellerWorkflow(
+            tenant=self.tenant,
+            bot_config=self.bot_config,
+            telegram_service=self.telegram_service,
+        )
 
     def dispatch(self, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Route an incoming update to the appropriate handler based on its payload structure."""
@@ -70,11 +76,24 @@ class TelegramDispatcher:
     def _handle_message_update(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         user = self._sync_user(message_data.get("from"), message_data.get("chat"))
         chat_id = message_data.get("chat", {}).get("id")
+
+        # Handle Photo Uploads in active creation workflow
+        if "photo" in message_data and user and chat_id:
+            return self.seller_workflow.handle_photo_upload(user, chat_id, message_data["photo"])
+
         text = message_data.get("text", "")
 
         command, args = self._parse_command(text)
         if command:
             return self._route_command(user, chat_id, command, args)
+
+        # Handle in-flight interactive conversational state
+        if user and chat_id:
+            conv = self.seller_workflow.get_or_create_state(user)
+            if conv.state == ConversationState.REGISTERING:
+                return self.seller_workflow.handle_registration_input(user, chat_id, text)
+            elif conv.state == ConversationState.CREATING_LISTING:
+                return self.seller_workflow.handle_listing_input(user, chat_id, text)
 
         return self.handle_text_message(user, chat_id, text)
 
@@ -90,6 +109,10 @@ class TelegramDispatcher:
             return self.handle_start(user, chat_id, args)
         elif command == "help":
             return self.handle_help(user, chat_id, args)
+        elif command == "register" and user:
+            return self.seller_workflow.start_registration(user, chat_id)
+        elif command == "list" and user:
+            return self.seller_workflow.start_listing_wizard(user, chat_id)
         else:
             return self.handle_unknown_command(user, chat_id, command)
 
@@ -103,16 +126,8 @@ class TelegramDispatcher:
         user_name = user.first_name if user and user.first_name else "Guest"
         bot_type = getattr(self.bot_config, "bot_type", "UNIFIED")
 
-        if bot_type == BotType.SELLER:
-            text = (
-                f"Hello {user_name}! 👋\n\n"
-                f"Welcome to <b>{self.tenant.name} Seller Bot</b>.\n"
-                f"Official currency: <b>{self.tenant.currency}</b>\n\n"
-                "Use this bot to register fish and submit auction listings:\n"
-                "• /register - Register as an authorized seller\n"
-                "• /list - Submit a new item or fish lot\n"
-                "• /help - View seller guidelines"
-            )
+        if bot_type == BotType.SELLER and user:
+            return self.seller_workflow.handle_start(user, chat_id)
         elif bot_type == BotType.BUYER:
             text = (
                 f"Hello {user_name}! 👋\n\n"
@@ -238,6 +253,7 @@ class TelegramDispatcher:
         user = self._sync_user(callback_data.get("from"))
         callback_id = callback_data.get("id")
         data_payload = callback_data.get("data", "")
+        chat_id = callback_data.get("message", {}).get("chat", {}).get("id") or (user.chat_id if user else None)
 
         # Always acknowledge callback query to dismiss loading state on client
         if callback_id:
@@ -249,6 +265,12 @@ class TelegramDispatcher:
             except Exception as exc:
                 logger.warning("Could not answer callback query %s: %s", callback_id, exc)
 
+        # Route through seller workflow if applicable
+        if user and chat_id:
+            seller_res = self.seller_workflow.handle_callback(user, chat_id, data_payload)
+            if seller_res.get("handled"):
+                return seller_res
+
         return {
             "handled": True,
             "type": "callback_query",
@@ -256,3 +278,4 @@ class TelegramDispatcher:
             "callback_id": callback_id,
             "data": data_payload,
         }
+

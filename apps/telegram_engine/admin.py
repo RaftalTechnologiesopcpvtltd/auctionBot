@@ -29,3 +29,14 @@ class TelegramUpdateLogAdmin(admin.ModelAdmin):
     list_filter = ("tenant", "bot_type")
     search_fields = ("update_id", "tenant__name")
     readonly_fields = ("tenant", "update_id", "bot_type", "created_at", "updated_at")
+
+
+from apps.telegram_engine.models import TelegramConversationState
+
+
+@admin.register(TelegramConversationState)
+class TelegramConversationStateAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "telegram_user", "bot_type", "state", "step", "updated_at")
+    list_filter = ("tenant", "bot_type", "state")
+    readonly_fields = ("created_at", "updated_at")
+

@@ -433,3 +433,386 @@ class TelegramServiceMockedTest(TelegramEngineTestBase):
         self.assertIn("deleteWebhook", args[0])
         self.assertTrue(kwargs["json"]["drop_pending_updates"])
 
+
+class SellerTelegramWorkflowAndSecurityTest(TelegramEngineTestBase):
+    """Rigorous tests for seller onboarding, listing wizard, draft recovery, and security isolation."""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_tg_svc = MagicMock(spec=TelegramService)
+        self.mock_tg_svc.send_message.return_value = {"ok": True, "result": {"message_id": 1001}}
+        self.mock_tg_svc.answer_callback_query.return_value = {"ok": True, "result": True}
+        self.mock_tg_svc.get_file.return_value = {"ok": True, "result": {"file_path": "photos/test_file.jpg"}}
+        self.mock_tg_svc.download_file.return_value = "/tmp/test_downloaded.jpg"
+
+        # Dispatcher configured with SELLER bot
+        self.bot_my.bot_type = BotType.SELLER
+        self.bot_my.save()
+
+        self.dispatcher = TelegramDispatcher(
+            tenant=self.tenant_my,
+            bot_config=self.bot_my,
+            telegram_service=self.mock_tg_svc,
+        )
+
+        self.chat_id = 99887766
+        self.from_user = {
+            "id": 99887766,
+            "is_bot": False,
+            "first_name": "Ahmad",
+            "username": "ahmad_seller",
+        }
+
+    def test_seller_registration_full_flow(self):
+        """Seller registers through conversational questionnaire and profile is created."""
+        from apps.listings.models import Seller, SellerStatus
+
+        # 1. /start command
+        update_start = {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": self.from_user,
+                "chat": {"id": self.chat_id},
+                "text": "/start",
+            },
+        }
+        res = self.dispatcher.dispatch(update_start)
+        self.assertTrue(res["handled"])
+        self.mock_tg_svc.send_message.assert_called()
+
+        # 2. Click Register callback
+        update_cb = {
+            "update_id": 1002,
+            "callback_query": {
+                "id": "cb_reg_01",
+                "from": self.from_user,
+                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
+                "data": "seller_register",
+            },
+        }
+        res_cb = self.dispatcher.dispatch(update_cb)
+        self.assertEqual(res_cb["step"], "BUSINESS_NAME")
+
+        # 3. Enter Business Name
+        self.dispatcher.dispatch({
+            "update_id": 1003,
+            "message": {"message_id": 2, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Aquatic Paradise MY"},
+        })
+
+        # 4. Enter Contact Name
+        self.dispatcher.dispatch({
+            "update_id": 1004,
+            "message": {"message_id": 3, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Ahmad Razak"},
+        })
+
+        # 5. Enter Phone
+        self.dispatcher.dispatch({
+            "update_id": 1005,
+            "message": {"message_id": 4, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "+60123456789"},
+        })
+
+        # 6. Enter Email
+        self.dispatcher.dispatch({
+            "update_id": 1006,
+            "message": {"message_id": 5, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "ahmad@aquaticparadise.my"},
+        })
+
+        # 7. Enter Address
+        res_final = self.dispatcher.dispatch({
+            "update_id": 1007,
+            "message": {"message_id": 6, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Kulai, Johor, Malaysia"},
+        })
+        self.assertTrue(res_final["handled"])
+
+        # Assert Seller record created
+        seller = Seller.objects.get(tenant=self.tenant_my, seller_id=str(self.chat_id))
+        self.assertEqual(seller.business_name, "Aquatic Paradise MY")
+        self.assertEqual(seller.contact_name, "Ahmad Razak")
+        self.assertEqual(seller.phone, "+60123456789")
+        self.assertEqual(seller.email, "ahmad@aquaticparadise.my")
+        self.assertEqual(seller.status, SellerStatus.ACTIVE)
+
+    def test_listing_wizard_flow_and_submission(self):
+        """Registered seller creates listing with photos, reviews draft, and submits for approval."""
+        from apps.listings.models import Seller, Listing, ListingStatus, ListingImage
+
+        # Create registered seller
+        tg_user = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=self.chat_id,
+            chat_id=self.chat_id,
+            username="ahmad_seller",
+            first_name="Ahmad",
+        )
+        Seller.objects.create(
+            tenant=self.tenant_my,
+            telegram_user=tg_user,
+            seller_id=str(self.chat_id),
+            business_name="Aquatic Paradise MY",
+            contact_name="Ahmad Razak",
+            phone="+60123456789",
+        )
+
+        # 1. Trigger create listing callback
+        self.dispatcher.dispatch({
+            "update_id": 2001,
+            "callback_query": {
+                "id": "cb_list_01",
+                "from": self.from_user,
+                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
+                "data": "create_listing",
+            },
+        })
+
+        # 2. Title
+        self.dispatcher.dispatch({
+            "update_id": 2002,
+            "message": {"message_id": 2, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "High Grade Super Red Betta Pair"},
+        })
+
+        # 3. Description
+        self.dispatcher.dispatch({
+            "update_id": 2003,
+            "message": {"message_id": 3, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "Proven breeder pair, 3.5 months old, fed live daphnia."},
+        })
+
+        # 4. Category
+        self.dispatcher.dispatch({
+            "update_id": 2004,
+            "callback_query": {
+                "id": "cb_cat_01",
+                "from": self.from_user,
+                "message": {"message_id": 3, "chat": {"id": self.chat_id}},
+                "data": "cat_select:Betta",
+            },
+        })
+
+        # 5. Starting Price
+        self.dispatcher.dispatch({
+            "update_id": 2005,
+            "message": {"message_id": 4, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "80.00"},
+        })
+
+        # 6. Buy Now Price (optional)
+        self.dispatcher.dispatch({
+            "update_id": 2006,
+            "message": {"message_id": 5, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "150.00"},
+        })
+
+        # 7. Quantity
+        self.dispatcher.dispatch({
+            "update_id": 2007,
+            "message": {"message_id": 6, "from": self.from_user, "chat": {"id": self.chat_id}, "text": "1"},
+        })
+
+        # 8. Upload Photo
+        photo_update = {
+            "update_id": 2008,
+            "message": {
+                "message_id": 7,
+                "from": self.from_user,
+                "chat": {"id": self.chat_id},
+                "photo": [
+                    {"file_id": "thumb_123", "width": 100, "height": 100},
+                    {"file_id": "highres_123", "width": 800, "height": 800},
+                ],
+            },
+        }
+        res_photo = self.dispatcher.dispatch(photo_update)
+        self.assertEqual(res_photo["photo_count"], 1)
+
+        # 9. Click Done with photos -> shows review
+        self.dispatcher.dispatch({
+            "update_id": 2009,
+            "callback_query": {
+                "id": "cb_done_01",
+                "from": self.from_user,
+                "message": {"message_id": 7, "chat": {"id": self.chat_id}},
+                "data": "listing_images_done",
+            },
+        })
+
+        # 10. Click Submit Listing
+        res_submit = self.dispatcher.dispatch({
+            "update_id": 2010,
+            "callback_query": {
+                "id": "cb_sub_01",
+                "from": self.from_user,
+                "message": {"message_id": 8, "chat": {"id": self.chat_id}},
+                "data": "submit_listing",
+            },
+        })
+        self.assertTrue(res_submit["handled"])
+        listing_id = res_submit["listing_id"]
+
+        # Assert DB listing state
+        listing = Listing.objects.get(id=listing_id)
+        self.assertEqual(listing.tenant, self.tenant_my)
+        self.assertEqual(listing.seller_id, str(self.chat_id))
+        self.assertEqual(listing.title, "High Grade Super Red Betta Pair")
+        self.assertEqual(listing.category, "Betta")
+        self.assertEqual(listing.status, ListingStatus.PENDING)
+        self.assertEqual(listing.metadata["starting_price"], "80.00")
+        self.assertEqual(listing.metadata["buy_now_price"], "150.00")
+
+        # Verify images attached
+        self.assertEqual(ListingImage.objects.filter(listing=listing).count(), 1)
+        self.assertEqual(ListingImage.objects.get(listing=listing).telegram_file_id, "highres_123")
+
+    def test_draft_recovery_on_start(self):
+        """In-progress listing draft is preserved and prompts recovery on subsequent /start."""
+        from apps.listings.models import Seller
+        from apps.telegram_engine.models import TelegramConversationState, ConversationState
+
+        tg_user = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=self.chat_id,
+            chat_id=self.chat_id,
+            username="ahmad_seller",
+        )
+        Seller.objects.create(
+            tenant=self.tenant_my,
+            telegram_user=tg_user,
+            seller_id=str(self.chat_id),
+            business_name="Aquatic Paradise MY",
+            contact_name="Ahmad Razak",
+            phone="+60123456789",
+        )
+
+        conv = TelegramConversationState.objects.create(
+            tenant=self.tenant_my,
+            telegram_user=tg_user,
+            bot_type=BotType.SELLER,
+            state=ConversationState.CREATING_LISTING,
+            step="STARTING_PRICE",
+            context_data={"listing_draft": {"title": "Rare Discus Fish"}},
+        )
+
+        # User sends /start
+        res = self.dispatcher.dispatch({
+            "update_id": 3001,
+            "message": {
+                "message_id": 1,
+                "from": self.from_user,
+                "chat": {"id": self.chat_id},
+                "text": "/start",
+            },
+        })
+        self.assertEqual(res["action"], "prompt_resume_draft")
+
+        # User clicks resume
+        res_resume = self.dispatcher.dispatch({
+            "update_id": 3002,
+            "callback_query": {
+                "id": "cb_res_01",
+                "from": self.from_user,
+                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
+                "data": "resume_listing",
+            },
+        })
+        self.assertEqual(res_resume["action"], "resumed")
+        self.assertEqual(res_resume["step"], "STARTING_PRICE")
+
+        # User clicks cancel
+        res_cancel = self.dispatcher.dispatch({
+            "update_id": 3003,
+            "callback_query": {
+                "id": "cb_can_01",
+                "from": self.from_user,
+                "message": {"message_id": 1, "chat": {"id": self.chat_id}},
+                "data": "cancel_listing",
+            },
+        })
+        self.assertTrue(res_cancel["handled"])
+        conv.refresh_from_db()
+        self.assertEqual(conv.state, ConversationState.IDLE)
+
+    def test_tenant_isolation_seller_workflows(self):
+        """Seller in Tenant MY cannot affect Tenant AU state."""
+        from apps.listings.models import Seller
+
+        tg_user_my = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=12345,
+            chat_id=12345,
+            username="seller_my",
+        )
+        Seller.objects.create(
+            tenant=self.tenant_my,
+            telegram_user=tg_user_my,
+            seller_id="12345",
+            business_name="MY Betta Hub",
+            contact_name="Bob",
+            phone="+60111111111",
+        )
+
+        # Dispatcher for AU
+        dispatcher_au = TelegramDispatcher(
+            tenant=self.tenant_au,
+            bot_config=self.bot_au,
+            telegram_service=self.mock_tg_svc,
+        )
+
+        # AU dispatcher must not see MY seller profile
+        tg_user_au = TelegramUser.objects.create(
+            tenant=self.tenant_au,
+            telegram_user_id=12345,
+            chat_id=12345,
+            username="seller_my",
+        )
+        self.assertIsNone(dispatcher_au.seller_workflow.get_seller_profile(tg_user_au))
+
+    def test_dashboard_approval_and_rejection_notification(self):
+        """Admin approving/rejecting a listing notifies the seller via Telegram."""
+        from apps.listings.models import Seller, Listing, ListingStatus
+        from services.listings import approve_listing, reject_listing
+
+        tg_user = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=self.chat_id,
+            chat_id=self.chat_id,
+            username="ahmad_seller",
+        )
+        seller = Seller.objects.create(
+            tenant=self.tenant_my,
+            telegram_user=tg_user,
+            seller_id=str(self.chat_id),
+            business_name="Aquatic Paradise MY",
+            contact_name="Ahmad Razak",
+            phone="+60123456789",
+        )
+        listing = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id=seller.seller_id,
+            title="Premium Platinum Guppy",
+            status=ListingStatus.PENDING,
+        )
+
+        with patch("services.telegram.TelegramService.send_message") as mock_send:
+            # 1. Approve
+            approve_listing(listing, approved_by="admin_user")
+            listing.refresh_from_db()
+            self.assertEqual(listing.status, ListingStatus.APPROVED)
+            mock_send.assert_called_once()
+            call_kwargs = mock_send.call_args[1]
+            self.assertEqual(call_kwargs["chat_id"], self.chat_id)
+            self.assertIn("Listing Approved", call_kwargs["text"])
+
+        # Reset to PENDING for rejection test
+        listing.status = ListingStatus.PENDING
+        listing.save()
+
+        with patch("services.telegram.TelegramService.send_message") as mock_send:
+            # 2. Reject
+            reject_listing(listing, reason="Unclear photos of fish gills")
+            listing.refresh_from_db()
+            self.assertEqual(listing.status, ListingStatus.REJECTED)
+            self.assertEqual(listing.metadata["rejection_reason"], "Unclear photos of fish gills")
+            mock_send.assert_called_once()
+            call_kwargs = mock_send.call_args[1]
+            self.assertEqual(call_kwargs["chat_id"], self.chat_id)
+            self.assertIn("Listing Not Approved", call_kwargs["text"])
+            self.assertIn("Unclear photos of fish gills", call_kwargs["text"])
+
+

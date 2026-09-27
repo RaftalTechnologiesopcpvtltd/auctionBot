@@ -155,3 +155,22 @@ class TelegramService:
         """Remove webhook registration from Telegram."""
         return self._execute_api_call("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
 
+    def get_file(self, file_id: str) -> Dict[str, Any]:
+        """Fetch metadata for a file including its file_path from Telegram."""
+        return self._execute_api_call("getFile", {"file_id": file_id})
+
+    def download_file(self, file_path: str, destination_path: str) -> str:
+        """Download a Telegram file to local storage securely."""
+        token = self.config.get_token()
+        if not token:
+            raise TelegramServiceError("No token configured to download file.")
+        url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        response = self.http_client.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        import os
+        os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+        with open(destination_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return destination_path
+

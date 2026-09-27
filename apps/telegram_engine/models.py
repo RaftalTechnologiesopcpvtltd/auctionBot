@@ -187,3 +187,80 @@ class TelegramUpdateLog(TenantOwnedModel):
 
     def __str__(self) -> str:
         return f"[{self.tenant.code}] Update {self.update_id} ({self.created_at})"
+
+
+class ConversationState(models.TextChoices):
+    IDLE = "IDLE", "Idle"
+    REGISTERING = "REGISTERING", "Registering as Seller"
+    CREATING_LISTING = "CREATING_LISTING", "Creating Listing"
+    REVIEWING_LISTING = "REVIEWING_LISTING", "Reviewing Listing"
+
+
+class TelegramConversationState(TenantOwnedModel):
+    """Tracks persistent multi-step interactive conversation states per user and bot."""
+
+    telegram_user = models.ForeignKey(
+        TelegramUser,
+        on_delete=models.CASCADE,
+        related_name="conversation_states",
+        help_text="The Telegram user engaged in this conversation.",
+    )
+    bot_type = models.CharField(
+        max_length=32,
+        choices=BotType.choices,
+        default=BotType.SELLER,
+        help_text="Category of the Telegram bot context.",
+    )
+    state = models.CharField(
+        max_length=64,
+        choices=ConversationState.choices,
+        default=ConversationState.IDLE,
+        db_index=True,
+        help_text="Current state in the workflow state machine.",
+    )
+    step = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Current sub-step or questionnaire field.",
+    )
+    context_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="JSON payload storing in-progress form inputs, draft listing IDs, etc.",
+    )
+
+    class Meta:
+        verbose_name = "Telegram Conversation State"
+        verbose_name_plural = "Telegram Conversation States"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "telegram_user", "bot_type"],
+                name="unique_tenant_user_bot_state",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "telegram_user", "bot_type"]),
+            models.Index(fields=["tenant", "state"]),
+        ]
+
+    def reset(self) -> None:
+        """Resets the conversation to idle and clears temporary context."""
+        self.state = ConversationState.IDLE
+        self.step = ""
+        self.context_data = {}
+        self.save(update_fields=["state", "step", "context_data", "updated_at"])
+
+    def set_state(self, state: str, step: str = "", context_update: dict = None) -> None:
+        """Transitions state and optionally updates context."""
+        self.state = state
+        self.step = step
+        if context_update:
+            if not isinstance(self.context_data, dict):
+                self.context_data = {}
+            self.context_data.update(context_update)
+        self.save(update_fields=["state", "step", "context_data", "updated_at"])
+
+    def __str__(self) -> str:
+        return f"[{self.tenant.code}] {self.telegram_user} - {self.state} ({self.step})"
+

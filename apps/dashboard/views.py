@@ -337,10 +337,14 @@ def listings_list_view(request):
 def listing_detail_view(request, listing_id):
     """Listing review view matching screen 44.jpeg."""
     tenant = request.tenant
-    listing = get_object_or_404(Listing, id=listing_id, tenant=tenant)
+    listing = get_object_or_404(Listing.objects.prefetch_related("images"), id=listing_id, tenant=tenant)
+    from apps.listings.models import Seller
+    seller = Seller.objects.filter(tenant=tenant, seller_id=listing.seller_id).first()
     context = {
         "page_title": f"Listing Details #{listing.id}",
         "listing": listing,
+        "seller": seller,
+        "images": listing.images.all(),
     }
     return render(request, "dashboard/listings/detail.html", context)
 
@@ -426,6 +430,8 @@ def sellers_list_view(request):
     tenant = request.tenant
     q = request.GET.get("q", "").strip()
 
+    from apps.listings.models import Seller, SellerStatus
+
     # Query distinct sellers from listings
     sellers_qs = (
         Listing.objects.filter(tenant=tenant)
@@ -442,10 +448,10 @@ def sellers_list_view(request):
             Q(seller_username__icontains=q) | Q(seller_id__icontains=q)
         )
 
-    total_sellers = sellers_qs.count()
-    active_sellers = total_sellers
-    pending_approval = 0
-    blocked_sellers = 0
+    total_sellers = Seller.objects.filter(tenant=tenant).count() or sellers_qs.count()
+    active_sellers = Seller.objects.filter(tenant=tenant, status=SellerStatus.ACTIVE).count() or total_sellers
+    pending_approval = Seller.objects.filter(tenant=tenant, status=SellerStatus.PENDING).count()
+    blocked_sellers = Seller.objects.filter(tenant=tenant, status=SellerStatus.SUSPENDED).count()
 
     paginator = Paginator(sellers_qs, 10)
     page_number = request.GET.get("page")

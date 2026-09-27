@@ -103,3 +103,108 @@ class ListingDomainTest(TestCase):
         self.assertNotIn(listing_b, a_results)
         self.assertIn(listing_b, b_results)
         self.assertNotIn(listing_a, b_results)
+
+
+class SellerAndMediaDomainTest(TestCase):
+    """Tests for Seller model, status lifecycles, and ListingImage media attachments."""
+
+    def setUp(self):
+        self.tenant_a = Tenant.objects.create(
+            name="CYG Malaysia",
+            slug="cyg-my",
+            code="MY",
+            country="Malaysia",
+            timezone="Asia/Kuala_Lumpur",
+            currency="MYR",
+        )
+        self.tenant_b = Tenant.objects.create(
+            name="AquaBid Australia",
+            slug="aquabid-au",
+            code="AU",
+            country="Australia",
+            timezone="Australia/Sydney",
+            currency="AUD",
+        )
+        from apps.telegram_engine.models import TelegramUser
+        self.tg_user_a = TelegramUser.objects.create(
+            tenant=self.tenant_a,
+            telegram_user_id=1001,
+            chat_id=1001,
+            username="seller_alice",
+        )
+        self.tg_user_b = TelegramUser.objects.create(
+            tenant=self.tenant_b,
+            telegram_user_id=1001,
+            chat_id=1001,
+            username="seller_alice_au",
+        )
+
+    def test_seller_creation_and_uniqueness(self):
+        """Seller creation verifies uniqueness per tenant and prevents duplicate profiles."""
+        from django.db import IntegrityError
+        from apps.listings.models import Seller, SellerStatus
+
+        seller_a = Seller.objects.create(
+            tenant=self.tenant_a,
+            telegram_user=self.tg_user_a,
+            seller_id="1001",
+            business_name="Alice Betta Farm",
+            contact_name="Alice Tan",
+            phone="+6012345678",
+            status=SellerStatus.ACTIVE,
+        )
+        self.assertIsNotNone(seller_a.id)
+
+        # Duplicate in same tenant must raise IntegrityError
+        from django.db import transaction
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Seller.objects.create(
+                    tenant=self.tenant_a,
+                    telegram_user=self.tg_user_a,
+                    seller_id="1001",
+                    business_name="Duplicate Farm",
+                    contact_name="Alice Tan",
+                    phone="+6012345678",
+                )
+
+        # Same telegram_user_id in different tenant (Tenant B) is fully isolated and allowed
+        seller_b = Seller.objects.create(
+            tenant=self.tenant_b,
+            telegram_user=self.tg_user_b,
+            seller_id="1001",
+            business_name="Alice Australia",
+            contact_name="Alice Tan",
+            phone="+61412345678",
+        )
+        self.assertIsNotNone(seller_b.id)
+        self.assertEqual(Seller.objects.filter(tenant=self.tenant_a).count(), 1)
+        self.assertEqual(Seller.objects.filter(tenant=self.tenant_b).count(), 1)
+
+    def test_listing_image_attachment(self):
+        """ListingImage attaches to listing with order preserving gallery sequence."""
+        from apps.listings.models import ListingImage
+
+        listing = listing_service.create_listing(
+            tenant=self.tenant_a,
+            seller_id="1001",
+            title="Kohaku High Grade",
+        )
+        img1 = listing_service.attach_listing_image(
+            listing=listing,
+            file_url="tenants/cyg-my/listings/img1.jpg",
+            telegram_file_id="tg_123",
+            order=1,
+        )
+        img2 = listing_service.attach_listing_image(
+            listing=listing,
+            file_url="tenants/cyg-my/listings/img2.jpg",
+            telegram_file_id="tg_456",
+            order=2,
+        )
+
+        images = list(listing.images.all())
+        self.assertEqual(len(images), 2)
+        self.assertEqual(images[0].telegram_file_id, "tg_123")
+        self.assertEqual(images[1].telegram_file_id, "tg_456")
+

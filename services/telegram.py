@@ -128,3 +128,30 @@ class TelegramService:
         if text:
             payload["text"] = text
         return self._execute_api_call("answerCallbackQuery", payload)
+
+    def get_me(self) -> Dict[str, Any]:
+        """Fetch bot identity details from Telegram Bot API to verify token connectivity."""
+        return self._execute_api_call("getMe", {})
+
+    def set_webhook(
+        self,
+        url: str,
+        secret_token: Optional[str] = None,
+        allowed_updates: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Register a public webhook endpoint URL with Telegram Bot API."""
+        payload: Dict[str, Any] = {"url": url}
+        if secret_token:
+            payload["secret_token"] = secret_token
+        if allowed_updates is not None:
+            payload["allowed_updates"] = allowed_updates
+        return self._execute_api_call("setWebhook", payload)
+
+    def get_webhook_info(self) -> Dict[str, Any]:
+        """Fetch current webhook delivery configuration and status from Telegram."""
+        return self._execute_api_call("getWebhookInfo", {})
+
+    def delete_webhook(self, drop_pending_updates: bool = False) -> Dict[str, Any]:
+        """Remove webhook registration from Telegram."""
+        return self._execute_api_call("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
+

@@ -386,3 +386,50 @@ class TelegramServiceMockedTest(TelegramEngineTestBase):
         self.assertIn("answerCallbackQuery", args[0])
         self.assertEqual(kwargs["json"]["callback_query_id"], "cb_123")
         self.assertTrue(kwargs["json"]["show_alert"])
+
+    def test_telegram_service_get_me_mocked(self):
+        """TelegramService formats getMe payload correctly."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "ok": True,
+            "result": {"id": 123456, "is_bot": True, "first_name": "TestBot", "username": "TestBot"},
+        }
+        mock_client.post.return_value = mock_response
+
+        svc = TelegramService(self.bot_my, http_client=mock_client)
+        res = svc.get_me()
+
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res["result"]["username"], "TestBot")
+        mock_client.post.assert_called_once()
+        args, kwargs = mock_client.post.call_args
+        self.assertIn("getMe", args[0])
+
+    def test_telegram_service_webhook_methods_mocked(self):
+        """TelegramService formats setWebhook, getWebhookInfo, and deleteWebhook correctly."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"ok": True, "result": True}
+        mock_client.post.return_value = mock_response
+
+        svc = TelegramService(self.bot_my, http_client=mock_client)
+
+        # set_webhook
+        svc.set_webhook("https://example.com/webhook/", secret_token="secret123")
+        args, kwargs = mock_client.post.call_args
+        self.assertIn("setWebhook", args[0])
+        self.assertEqual(kwargs["json"]["url"], "https://example.com/webhook/")
+        self.assertEqual(kwargs["json"]["secret_token"], "secret123")
+
+        # get_webhook_info
+        svc.get_webhook_info()
+        args, _ = mock_client.post.call_args
+        self.assertIn("getWebhookInfo", args[0])
+
+        # delete_webhook
+        svc.delete_webhook(drop_pending_updates=True)
+        args, kwargs = mock_client.post.call_args
+        self.assertIn("deleteWebhook", args[0])
+        self.assertTrue(kwargs["json"]["drop_pending_updates"])
+

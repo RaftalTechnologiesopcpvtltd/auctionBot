@@ -13,3 +13,9 @@ celery>=5.4.0
 
 # Environment Configuration
 python-dotenv>=1.0.0
+
+# Security & Cryptography
+cryptography>=42.0.0
+
+# HTTP Client
+requests>=2.31.0

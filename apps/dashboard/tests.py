@@ -624,3 +624,61 @@ class CrossTenantSecurityAndIDORTests(TestCase):
         self.assertContains(response, "admin_a")
         self.assertContains(response, "staff_a")
         self.assertNotContains(response, "admin_b")
+
+    def test_cross_subdomain_access_rejected_with_403(self):
+        """A tenant admin accessing another tenant's subdomain is strictly denied with 403."""
+        self.client.login(username="admin_a", password="SecurePassword123!")
+        # Access with HTTP_HOST of Tenant B (cyg-my.auctionbot.shop)
+        response = self.client.get(reverse("dashboard:home"), HTTP_HOST=f"{self.tenant_b.slug}.auctionbot.shop")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"Permission denied", response.content)
+
+    def test_query_param_tenant_override_rejected_for_non_platform_admin(self):
+        """A non-platform tenant admin passing ?tenant=<other> is rejected with 403."""
+        self.client.login(username="admin_a", password="SecurePassword123!")
+        response = self.client.get(f"{reverse('dashboard:home')}?tenant={self.tenant_b.slug}")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"Permission denied", response.content)
+
+    def test_staff_without_membership_denied_access(self):
+        """A user with is_staff=True but no TenantMembership is denied and redirected to login."""
+        unassigned_staff = User.objects.create_user(
+            username="unassigned_staff",
+            password="SecurePassword123!",
+            is_staff=True,
+        )
+        self.client.login(username="unassigned_staff", password="SecurePassword123!")
+        response = self.client.get(reverse("dashboard:home"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dashboard:login"), response.url)
+
+    def test_telegram_users_isolated_per_tenant(self):
+        """Telegram users belonging to Tenant B are never rendered in Tenant A's dashboard."""
+        TelegramUser.objects.create(
+            tenant=self.tenant_a,
+            telegram_user_id=111111,
+            chat_id=111111,
+            username="tg_user_a",
+            first_name="Alice",
+        )
+        TelegramUser.objects.create(
+            tenant=self.tenant_b,
+            telegram_user_id=222222,
+            chat_id=222222,
+            username="tg_user_b",
+            first_name="Bob",
+        )
+        self.client.login(username="admin_a", password="SecurePassword123!")
+        response = self.client.get(reverse("dashboard:telegram_users"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "tg_user_a")
+        self.assertNotContains(response, "tg_user_b")
+
+    def test_wallets_and_accounts_isolated_per_tenant(self):
+        """Financial accounts for Tenant B are never rendered in Tenant A's wallets overview."""
+        self.client.login(username="admin_a", password="SecurePassword123!")
+        response = self.client.get(reverse("dashboard:finance_wallets"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "buyer_a_10")
+        self.assertNotContains(response, "buyer_b_42")
+

@@ -36,11 +36,28 @@ def dashboard_auth_required(view_func):
                 messages.error(request, "You are not assigned to any active organization.")
                 return redirect("/dashboard/login/")
 
+        # Cross-subdomain isolation: Non-platform users accessing a specific tenant subdomain
+        # must belong strictly to that tenant organization.
+        subdomain_tenant = getattr(request, "tenant", None)
+        subdomain = getattr(request, "subdomain", None)
+        if subdomain and subdomain not in ("admin", "localhost") and not is_platform_admin(request.user):
+            if subdomain_tenant and subdomain_tenant.id != active_tenant.id:
+                from django.http import HttpResponseForbidden
+                return HttpResponseForbidden("Permission denied: You are not authorized to access this organization's portal.")
+
+        # Query parameter override: Only platform administrators may select tenant context via query string
+        if request.GET.get("tenant") and not is_platform_admin(request.user):
+            query_tenant = Tenant.objects.filter(slug__iexact=request.GET.get("tenant")).first()
+            if query_tenant and query_tenant.id != active_tenant.id:
+                from django.http import HttpResponseForbidden
+                return HttpResponseForbidden("Permission denied: Only platform administrators are permitted to select tenant context via query parameter.")
+
         request.tenant = active_tenant
         if active_tenant:
             request.session["active_tenant_id"] = active_tenant.id
         request.is_platform_admin = is_platform_admin(request.user)
 
         return view_func(request, *args, **kwargs)
+
 
     return _wrapped_view

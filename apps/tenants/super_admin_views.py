@@ -123,7 +123,6 @@ def super_admin_register_tenant(request):
             currency=currency,
             timezone=timezone,
             admin_username=admin_username,
-            admin_initial_password=admin_password,
             is_active=True,
         )
 
@@ -281,4 +280,41 @@ def super_admin_set_webhook(request, bot_id):
         return JsonResponse(res)
     except Exception as exc:
         return JsonResponse({"ok": False, "error": str(exc)})
+
+
+@super_admin_required
+@require_POST
+def super_admin_reset_tenant_password(request, tenant_id):
+    """Resets the administrator password for a tenant without storing plaintext."""
+    tenant = get_object_or_404(Tenant, id=tenant_id)
+    new_password = request.POST.get("new_password", "").strip()
+
+    if not new_password or len(new_password) < 8:
+        messages.error(request, "Password must be at least 8 characters long.")
+        return redirect("super_admin:dashboard")
+
+    # Find the primary admin user for this tenant
+    admin_membership = TenantMembership.objects.filter(
+        tenant=tenant,
+        role=TenantRole.TENANT_ADMIN,
+        is_active=True,
+    ).select_related("user").first()
+
+    if admin_membership and admin_membership.user:
+        admin_membership.user.set_password(new_password)
+        admin_membership.user.save()
+        messages.success(request, f"Password for tenant '{tenant.name}' admin (@{admin_membership.user.username}) was reset successfully.")
+    elif tenant.admin_username:
+        user = User.objects.filter(username=tenant.admin_username).first()
+        if user:
+            user.set_password(new_password)
+            user.save()
+            messages.success(request, f"Password for tenant '{tenant.name}' admin (@{user.username}) was reset successfully.")
+        else:
+            messages.error(request, f"Admin user '{tenant.admin_username}' not found.")
+    else:
+        messages.error(request, f"No administrator account associated with tenant '{tenant.name}'.")
+
+    return redirect("super_admin:dashboard")
+
 

@@ -133,11 +133,6 @@ def resolve_requested_tenant(
         TenantMembership.objects.filter(user=user, is_active=True).select_related("tenant")
     )
     if not user_memberships:
-        # Fallback for staff users without membership record (e.g. initial superuser/admin transition)
-        if user.is_staff:
-            default_t = Tenant.objects.filter(is_active=True).order_by("name").first()
-            if default_t:
-                return default_t
         raise PermissionDenied("You do not have an active membership for any tenant organization.")
 
     # User's assigned tenant

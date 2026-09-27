@@ -66,7 +66,10 @@ jobs:
             fi
 
             echo "=== [4/6] Building production containers ==="
+            # Terminate any stray development runserver processes on host port 8000
+            pkill -f "manage.py runserver" || true
             docker compose -f docker-compose.prod.yml build
+
 
             echo "=== [4.5/6] Provisioning SSL Certificates via Certbot ==="
             mkdir -p /var/www/certbot

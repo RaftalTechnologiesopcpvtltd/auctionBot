@@ -22,7 +22,8 @@ from django.db import connection, IntegrityError, models
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 
-from apps.tenants.models import Tenant, TenantOwnedModel
+from django.contrib.auth.models import User
+from apps.tenants.models import Tenant, TenantOwnedModel, TenantMembership, TenantRole
 
 
 # Concrete test model strictly used to verify TenantOwnedModel behavior
@@ -462,7 +463,6 @@ class SuperAdminPortalTest(TestCase):
             timezone="Asia/Kuala_Lumpur",
             currency="MYR",
             admin_username="cyg_admin",
-            admin_initial_password="InitialPassword@123",
             is_active=True,
         )
 
@@ -472,8 +472,8 @@ class SuperAdminPortalTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/super-admin/login/", response.url)
 
-    def test_super_admin_login_and_dashboard(self):
-        """Super admin logs in and views dashboard with tenant password displayed."""
+    def test_super_admin_login_and_dashboard_does_not_leak_passwords(self):
+        """Super admin logs in; dashboard displays tenant but NEVER leaks passwords."""
         login_resp = self.client.post("/super-admin/login/", {
             "username": "superadmin",
             "password": "SuperPassword@786",
@@ -483,10 +483,12 @@ class SuperAdminPortalTest(TestCase):
         dash_resp = self.client.get("/super-admin/")
         self.assertEqual(dash_resp.status_code, 200)
         self.assertContains(dash_resp, "CYG Malaysia")
-        self.assertContains(dash_resp, "InitialPassword@123")
+        # Passwords must NEVER be rendered in plaintext
+        self.assertNotContains(dash_resp, "InitialPassword@123")
+        self.assertNotContains(dash_resp, "data-plain")
 
     def test_register_tenant_creates_dual_bots_and_credentials(self):
-        """Registering a new tenant provisions admin user, membership, and dual Telegram bots."""
+        """Registering a new tenant provisions admin user with secure hash and dual Telegram bots."""
         from apps.telegram_engine.models import TelegramBotConfig, BotType
 
         self.client.login(username="superadmin", password="SuperPassword@786")
@@ -509,7 +511,11 @@ class SuperAdminPortalTest(TestCase):
 
         new_tenant = Tenant.objects.get(slug="aquabid")
         self.assertEqual(new_tenant.admin_username, "aquabid_admin")
-        self.assertEqual(new_tenant.admin_initial_password, "AquaPassword@2026")
+
+        # Password must be securely hashed on User model, never stored on Tenant
+        self.assertFalse(hasattr(new_tenant, "admin_initial_password"))
+        admin_user = User.objects.get(username="aquabid_admin")
+        self.assertTrue(admin_user.check_password("AquaPassword@2026"))
 
         # Verify dual bots
         seller_bot = TelegramBotConfig.objects.get(tenant=new_tenant, bot_type=BotType.SELLER)
@@ -519,10 +525,26 @@ class SuperAdminPortalTest(TestCase):
         self.assertEqual(bidding_bot.bot_username, "AquaBidAuctionBot")
         self.assertEqual(bidding_bot.get_token(), "654321:XYZ-BiddingToken")
 
+    def test_super_admin_reset_tenant_password(self):
+        """Super admin can reset a tenant administrator's password without storing plaintext."""
+        self.client.login(username="superadmin", password="SuperPassword@786")
+        admin_user = User.objects.create_user(username="cyg_admin", password="OldPassword@123")
+        TenantMembership.objects.create(user=admin_user, tenant=self.tenant, role=TenantRole.TENANT_ADMIN)
+
+        resp = self.client.post(f"/super-admin/tenants/{self.tenant.id}/reset-password/", {
+            "new_password": "BrandNewSecurePassword@999",
+        })
+        self.assertEqual(resp.status_code, 302)
+
+        admin_user.refresh_from_db()
+        self.assertTrue(admin_user.check_password("BrandNewSecurePassword@999"))
+        self.assertFalse(admin_user.check_password("OldPassword@123"))
+
     def test_toggle_tenant_active(self):
         """Super admin can suspend and reactivate tenants."""
         self.client.login(username="superadmin", password="SuperPassword@786")
         self.assertTrue(self.tenant.is_active)
+
 
         self.client.post(f"/super-admin/tenants/{self.tenant.id}/toggle/")
         self.tenant.refresh_from_db()

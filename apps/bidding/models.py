@@ -91,6 +91,18 @@ class Auction(TenantOwnedModel):
         blank=True,
         help_text="Final winning hammer price.",
     )
+    anti_sniping_seconds = models.PositiveIntegerField(
+        default=120,
+        help_text="Window in seconds before end_at where incoming bids trigger an extension.",
+    )
+    extension_seconds = models.PositiveIntegerField(
+        default=120,
+        help_text="Duration in seconds to extend end_at when anti-sniping triggers.",
+    )
+    extension_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Total number of anti-sniping extensions applied to this auction.",
+    )
     is_reminder_sent = models.BooleanField(
         default=False,
         help_text="Flag indicating whether the 15-minute close reminder was dispatched.",
@@ -171,11 +183,25 @@ class Bid(TenantOwnedModel):
         db_index=True,
         help_text="Timestamp when the bid was registered.",
     )
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Unique client-provided key ensuring idempotent bid submission.",
+    )
 
     class Meta:
         verbose_name = "Bid"
         verbose_name_plural = "Bids"
         ordering = ["-amount", "-placed_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "auction", "idempotency_key"],
+                condition=models.Q(idempotency_key__isnull=False),
+                name="unique_tenant_auction_idempotency_key",
+            )
+        ]
         indexes = [
             models.Index(
                 fields=["auction", "-amount", "-placed_at"],
@@ -184,6 +210,10 @@ class Bid(TenantOwnedModel):
             models.Index(
                 fields=["tenant", "bidder_id"],
                 name="bid_tenant_bidder_idx",
+            ),
+            models.Index(
+                fields=["tenant", "auction", "idempotency_key"],
+                name="bid_tenant_idempotency_idx",
             ),
         ]
 

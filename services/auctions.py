@@ -4,7 +4,7 @@ Encapsulates headless auction lifecycle transitions, validation, and outcome cal
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union, Any
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -58,21 +58,40 @@ def start_auction(auction: Auction, as_of: Optional[datetime] = None) -> Auction
 
 
 @transaction.atomic
-def close_auction(auction: Auction) -> Auction:
-    """Closes an auction and calculates the final outcome (SOLD vs UNSOLD).
+def close_auction(
+    auction_or_id: Union[Auction, int],
+    as_of: Optional[datetime] = None,
+    tenant: Optional[Any] = None,
+) -> Auction:
+    """Closes an auction and calculates the final outcome (SOLD vs UNSOLD) with row-level locking.
 
-    If highest bid exists:
-      - Sets status = SOLD
-      - Records winner_id and winning_price
-      - Updates listing remaining_quantity = 0
-    If no bids exist:
-      - Sets status = UNSOLD
+    Concurrency and Idempotency Rules:
+    1. Locks the Auction row with SELECT FOR UPDATE to serialize closing operations.
+    2. If the auction is already SOLD, UNSOLD, CLOSED, or CANCELLED, returns immediately (idempotent).
+    3. Verifies that current time has reached or passed end_at (respecting anti-sniping extensions).
+    4. If bids exist: designates highest bidder as winner, records winning_price, updates listing.
+    5. If no bids exist: marks status as UNSOLD.
     """
-    if auction.status in (AuctionStatus.SOLD, AuctionStatus.UNSOLD, AuctionStatus.CANCELLED):
-        raise ValidationError(f"Auction is already completed with status '{auction.status}'.")
+    if isinstance(auction_or_id, Auction):
+        auction_id = auction_or_id.id
+    else:
+        auction_id = int(auction_or_id)
 
-    # Lock auction row for outcome determination
-    auction = Auction.objects.select_for_update().get(id=auction.id)
+    query = Auction.objects.select_for_update().select_related("listing", "tenant")
+    if tenant:
+        query = query.filter(tenant=tenant)
+
+    auction = query.get(id=auction_id)
+
+    # Idempotent guard: if already closed, return current state without re-processing
+    if auction.status in (AuctionStatus.SOLD, AuctionStatus.UNSOLD, AuctionStatus.CLOSED, AuctionStatus.CANCELLED):
+        return auction
+
+    now = as_of or timezone.now()
+    if now < auction.end_at:
+        raise ValidationError(
+            f"Cannot close auction #{auction.id}: end time ({auction.end_at}) has not passed yet."
+        )
 
     # Check for leading bid
     leading_bid = auction.bids.order_by("-amount", "-placed_at").first()

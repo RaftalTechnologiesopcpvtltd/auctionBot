@@ -34,10 +34,10 @@ This document describes the architectural foundation established across **Phase 
 | **Telegram Bot Configuration** | **Implemented** | Phase 04 | `TelegramBotConfig` with Fernet-encrypted bot tokens at rest |
 | **Telegram User Identity & Idempotency** | **Implemented** | Phase 04 | `TelegramUser` (tenant-scoped) & `TelegramUpdateLog` deduplication |
 | **Telegram Service Abstraction** | **Implemented** | Phase 04 | `TelegramService(tenant)` with mockable HTTP client |
+| **Concurrent Bidding Engine** | **Implemented** | Phase 05 | PostgreSQL row locks (`select_for_update`), anti-sniping, idempotency |
+| **Asynchronous Auction Closing** | **Implemented** | Phase 05 | Celery task `bidding.close_auction_task` with idempotent finalization |
 | *Tenant Routing Middleware* | *Deferred* | Future Phase | Subdomain and header-based tenant resolution |
 | *User / Tenant Membership* | *Deferred* | Future Phase | `TenantMembership` junction model and role permissions |
-| *Bidding Engine & Concurrency* | *Deferred* | Phase 05 | Anti-sniping, real-time bid competition, Redis locks |
-| *Auction Closing Workers* | *Deferred* | Phase 05 | Celery-based scheduled/asynchronous auction finalization |
 | *Wallet & Accounting* | *Deferred* | Phase 06 | Double-entry ledger, deposits, commissions, refunds |
 | *Dashboard UI* | *Deferred* | Phase 07 | Multi-tenant administrative and analytics portal |
 | *Legacy Data Migration* | *Deferred* | Phase 08 | Safe migration from `CYG_Aquatics_Malaysia` |
@@ -324,8 +324,65 @@ Telegram Update (HTTPS POST)
 The following capabilities are deferred to future phases:
 1. **Long Polling & Background Daemons**: Strictly rejected in favor of webhooks. No long-running polling processes.
 2. **Conversational FSMs & Seller Registration**: Multi-step state machines for listing registration are deferred to subsequent feature phases.
-3. **Bidding Engine Integration**: Redis distributed locking, anti-sniping dynamic extensions, and atomic concurrency are deferred to Phase 05.
-4. **Production Webhook Registration**: Registration of public domains via `setWebhook` is deferred to deployment phases.
+3. **Production Webhook Registration**: Registration of public domains via `setWebhook` is deferred to deployment phases.
+
+---
+
+## Concurrent Bidding Engine (Phase 05)
+
+### 1. Concurrency Architecture & PostgreSQL Row Locking
+PostgreSQL is the **authoritative source of truth** for all auction states, bids, and timing data.
+- **Pessimistic Row Locking**: When a bid is submitted or an auction is finalized, the engine executes:
+  ```python
+  Auction.objects.select_for_update().select_related("listing", "tenant").get(id=auction_id)
+  ```
+- **Serialization Guarantee**: Any competing thread or process attempting to bid on or close the same auction is blocked until the active database transaction commits.
+- **Authoritative In-Flight Recalculation**: Once the row lock is acquired, the engine reloads the current database state. Price increments and validity checks are calculated strictly from the locked row, preventing lost updates and dirty reads.
+
+```text
+Concurrent Bid A (Worker 1) ──┐
+                              ├─► BEGIN TRANSACTION ──► SELECT FOR UPDATE (Auction #X)
+Concurrent Bid B (Worker 2) ──┘        │
+                                       ▼ (Worker 1 acquires lock; Worker 2 blocks)
+                              1. Validate state, timing, bidder eligibility
+                              2. Recalculate min_next_bid from locked price
+                              3. Create Bid row (with idempotency_key)
+                              4. Update Auction current_price, highest_bid
+                              5. Apply anti-sniping extension if near end_at
+                              6. COMMIT TRANSACTION
+                                       │
+                                       ▼ (Worker 2 acquires lock, re-reads state)
+                              Evaluates newly committed price -> Rejects or accepts
+```
+
+### 2. Lock Ordering & Deadlock Prevention
+- All operations involving an auction and its bids follow a strict, single-tier lock hierarchy:
+  1. Lock `Auction` row first.
+  2. Perform secondary inserts/updates (`Bid`, `Listing`).
+- Circular lock acquisitions are prohibited across all domain services.
+
+### 3. Anti-Sniping Dynamic Extension
+- **Threshold Window**: Configured per auction (`anti_sniping_seconds`, default 120s).
+- **Extension Duration**: Configured per auction (`extension_seconds`, default 120s).
+- **Atomic Extension**: If a valid bid arrives within the threshold window, `auction.end_at` is extended by `extension_seconds` and `extension_count` is incremented under the row lock.
+- **Concurrent Observer Guarantee**: Any concurrent worker attempting to close the auction immediately observes the extended `end_at` upon lock acquisition and aborts closing.
+
+### 4. Bid Idempotency
+- `Bid` maintains an optional `idempotency_key` with a composite unique constraint: `(tenant, auction, idempotency_key)`.
+- If a client or webhook retries a bid with an existing key, the service immediately returns the existing `Bid` and `Auction` records without creating duplicate records or advancing the price ladder.
+
+### 5. Asynchronous Auction Closing (`bidding.close_auction_task`)
+- Executed via Celery with automatic retry handling (`max_retries=3`, `default_retry_delay=5`).
+- **Idempotency**: If the auction is already `SOLD`, `UNSOLD`, or `CANCELLED`, the task returns cleanly without duplicate operations.
+- **Timing Invariant**: The task asserts that current time has reached or passed `end_at`. If an auction was extended by anti-sniping, premature closure is blocked.
+- **Outcome Resolution**: Highest bid sets `status=SOLD` and `winner_id`; zero bids sets `status=UNSOLD`.
+
+### 6. Role of Redis
+- **Secondary Infrastructure Role**: Redis is utilized exclusively as the Celery task broker and caching layer.
+- **No Redis Locks**: Distributed Redis mutexes are deliberately omitted because PostgreSQL's row-level locking natively provides ACID transactional serialization with zero risk of cache/database divergence or split-brain states.
+
+### 7. External Side-Effect Boundary
+- External network requests (e.g. Telegram API `sendMessage`, payment webhooks) are **strictly forbidden** inside the database transaction block. All outbound side-effects must occur after the transaction has committed.
 
 ---
 

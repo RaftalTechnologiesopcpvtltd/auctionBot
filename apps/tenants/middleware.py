@@ -1,8 +1,8 @@
 """Subdomain-based Multi-Tenant resolution and isolation middleware."""
 import logging
 from typing import Optional
-from django.http import HttpRequest, HttpResponse, Http404
-from django.shortcuts import render, redirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, Http404
+from django.shortcuts import render
 from apps.tenants.models import Tenant
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class SubdomainTenantMiddleware:
         if subdomain == "admin" or request.path_info.startswith("/super-admin/"):
             request.is_super_admin_host = True
             if subdomain == "admin" and request.path_info == "/":
-                return redirect("/super-admin/")
+                return HttpResponseRedirect("/super-admin/")
 
         # 2. Specific Tenant Subdomain routing (<tenant_slug>.auctionbot.shop)
         elif subdomain:
@@ -58,7 +58,7 @@ class SubdomainTenantMiddleware:
                 request.session["active_tenant_id"] = tenant.id
 
             if request.path_info == "/":
-                return redirect("/dashboard/")
+                return HttpResponseRedirect("/dashboard/")
 
         # 3. Direct IP / Root domain access without subdomain (e.g. 72.62.248.151)
         else:
@@ -76,8 +76,8 @@ class SubdomainTenantMiddleware:
 
             if request.path_info == "/":
                 if request.is_super_admin_host:
-                    return redirect("/super-admin/")
-                return redirect("/dashboard/")
+                    return HttpResponseRedirect("/super-admin/")
+                return HttpResponseRedirect("/dashboard/")
 
         return self.get_response(request)
 

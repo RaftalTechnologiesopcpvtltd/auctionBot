@@ -41,7 +41,7 @@ def super_admin_login_view(request):
 
         if user is not None and (user.is_superuser or is_platform_admin(user)):
             login(request, user)
-            next_url = request.GET.get("next") or request.POST.get("next") or "/super-admin/"
+            next_url = request.GET.get("next") or request.POST.get("next") or "super_admin:dashboard"
             return redirect(next_url)
         else:
             messages.error(request, "Invalid credentials or account lacks Platform Administrator privileges.")
@@ -53,7 +53,7 @@ def super_admin_logout_view(request):
     """Logs out super admin and returns to login."""
     logout(request)
     messages.info(request, "Super Admin session closed.")
-    return redirect("/super-admin/login/")
+    return redirect("super_admin:login")
 
 
 @super_admin_required
@@ -172,7 +172,7 @@ def super_admin_register_tenant(request):
         logger.exception("Failed to register tenant: %s", exc)
         messages.error(request, f"Error registering tenant: {exc}")
 
-    return redirect("/super-admin/")
+    return redirect("super_admin:dashboard")
 
 
 @super_admin_required
@@ -184,7 +184,7 @@ def super_admin_toggle_tenant(request, tenant_id):
     tenant.save(update_fields=["is_active", "updated_at"])
     status_str = "activated" if tenant.is_active else "suspended"
     messages.success(request, f"Tenant '{tenant.name}' has been {status_str}.")
-    return redirect("/super-admin/")
+    return redirect("super_admin:dashboard")
 
 
 @super_admin_required
@@ -235,7 +235,7 @@ def super_admin_update_bot(request, bot_id):
     bot.save()
 
     messages.success(request, f"{bot.get_bot_type_display()} for '{bot.tenant.name}' updated successfully.")
-    return redirect("/super-admin/bots/")
+    return redirect("super_admin:bots")
 
 
 @super_admin_required

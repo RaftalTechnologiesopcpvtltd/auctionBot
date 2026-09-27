@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.bidding.apps.BiddingConfig",
     "apps.telegram_engine.apps.TelegramEngineConfig",
     "apps.finance.apps.FinanceConfig",
+    "apps.dashboard.apps.DashboardConfig",
 ]
 
 MIDDLEWARE = [
@@ -72,10 +73,16 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "apps.dashboard.context_processors.dashboard_context",
             ],
         },
     },
 ]
+
+# Authentication URLs for Dashboard
+LOGIN_URL = "/dashboard/login/"
+LOGIN_REDIRECT_URL = "/dashboard/"
+LOGOUT_REDIRECT_URL = "/dashboard/login/"
 
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"

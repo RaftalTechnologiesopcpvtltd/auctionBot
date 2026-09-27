@@ -1,0 +1,208 @@
+{% extends "dashboard/base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header & Action Buttons (Screen 11.jpeg) -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <div class="flex items-center space-x-3">
+                <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Auction #{{ auction.id }}</h1>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold {% if auction.status == 'ACTIVE' %}bg-emerald-50 text-emerald-700 border border-emerald-200/60{% elif auction.status == 'SOLD' %}bg-purple-50 text-purple-700 border border-purple-200/60{% else %}bg-slate-100 text-slate-600{% endif %}">
+                    {{ auction.status }}
+                </span>
+            </div>
+            <p class="text-sm text-slate-500 mt-0.5">{{ listing.title }} &bull; Live auction in progress.</p>
+        </div>
+
+        <div class="flex items-center space-x-2.5">
+            <a href="{% url 'dashboard:auctions_list' %}" class="px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors shadow-xs">
+                Back to Auctions
+            </a>
+            {% if auction.status == 'ACTIVE' %}
+            <form method="POST" action="{% url 'dashboard:auction_end' auction.id %}" onsubmit="return confirm('End this auction now? Highest bid will be awarded.');">
+                {% csrf_token %}
+                <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors">
+                    End Auction
+                </button>
+            </form>
+            <form method="POST" action="{% url 'dashboard:auction_cancel' auction.id %}" onsubmit="return confirm('Cancel this auction?');">
+                {% csrf_token %}
+                <button type="submit" class="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold shadow-xs transition-colors">
+                    Cancel Auction
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Main 3-Column Layout (Screen 11.jpeg) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Column 1: Image Showcase -->
+        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <div class="w-full h-64 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center relative">
+                {% if listing.image_url %}
+                <img src="{{ listing.image_url }}" alt="{{ listing.title }}" class="w-full h-full object-cover">
+                {% else %}
+                <div class="text-slate-500 text-xs flex flex-col items-center">
+                    <svg class="w-12 h-12 mb-2 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <span>Item Photo Preview</span>
+                </div>
+                {% endif %}
+            </div>
+            <div class="grid grid-cols-4 gap-2 mt-4">
+                <div class="h-14 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">Thumb 1</div>
+                <div class="h-14 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">Thumb 2</div>
+                <div class="h-14 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">Thumb 3</div>
+                <div class="h-14 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">Thumb 4</div>
+            </div>
+        </div>
+
+        <!-- Column 2: Auction Information Card -->
+        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
+            <h2 class="text-base font-bold text-slate-900 mb-4">Auction Information</h2>
+            <div class="divide-y divide-slate-100 text-xs space-y-2.5">
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Auction ID</span>
+                    <span class="font-bold text-slate-900">#{{ auction.id }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Title</span>
+                    <span class="font-semibold text-slate-900 text-right truncate max-w-[180px]">{{ listing.title }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Seller</span>
+                    <span class="font-semibold text-blue-600">@{{ listing.seller_username|default:listing.seller_id }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Starting Price</span>
+                    <span class="font-semibold text-slate-900">{{ active_tenant.currency }} {{ auction.starting_price }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Bid Increment</span>
+                    <span class="font-semibold text-slate-900">{{ active_tenant.currency }} {{ auction.bid_increment }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Start Time</span>
+                    <span class="font-medium text-slate-700">{{ auction.start_at|date:"d M Y, H:i" }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">End Time</span>
+                    <span class="font-medium text-slate-700">{{ auction.end_at|date:"d M Y, H:i" }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Total Bids</span>
+                    <span class="font-bold text-slate-900">{{ bids.count }}</span>
+                </div>
+                <div class="flex justify-between pt-2">
+                    <span class="text-slate-500 font-medium">Winner</span>
+                    <span class="font-bold text-emerald-600">{% if auction.winner_id %}@{{ auction.winner_id }}{% else %}In Progress{% endif %}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Column 3: Current Highest Bid & Time Remaining -->
+        <div class="space-y-6">
+            <!-- Current Highest Bid Card -->
+            <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Highest Bid</div>
+                <div class="text-4xl font-extrabold text-emerald-600 my-2">
+                    {% if auction.current_price %}
+                    {{ active_tenant.currency }} {{ auction.current_price }}
+                    {% else %}
+                    {{ active_tenant.currency }} {{ auction.starting_price }}
+                    {% endif %}
+                </div>
+                <div class="text-xs text-slate-500">
+                    by <span class="font-semibold text-slate-800">{% if auction.highest_bid %}@{{ auction.highest_bid.bidder_username|default:auction.highest_bid.bidder_id }}{% else %}No bids yet{% endif %}</span>
+                </div>
+                <a href="https://t.me/" target="_blank" class="mt-4 inline-flex items-center justify-center w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors">
+                    <svg class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.62 3.72-.53.36-1.01.54-1.44.53-.47-.01-1.38-.27-2.06-.49-.83-.27-1.49-.42-1.43-.88.03-.24.38-.49 1.03-.75 4.04-1.76 6.74-2.92 8.09-3.49 3.85-1.61 4.65-1.89 5.17-1.9.11 0 .37.03.54.17.14.12.18.28.2.45-.02.07-.02.21-.04.38z"/></svg>
+                    View Live on Telegram
+                </a>
+            </div>
+
+            <!-- Time Remaining Countdown Card -->
+            <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Time Remaining</div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div class="text-3xl font-extrabold text-blue-600">{{ hours_remaining|stringformat:"02d" }}</div>
+                        <div class="text-[11px] text-slate-400 font-medium mt-1">Hours</div>
+                    </div>
+                    <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div class="text-3xl font-extrabold text-blue-600">{{ minutes_remaining|stringformat:"02d" }}</div>
+                        <div class="text-[11px] text-slate-400 font-medium mt-1">Minutes</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Section: Bid History & Seller Information (Screen 11.jpeg) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Bid History Table -->
+        <div class="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
+            <h2 class="text-base font-bold text-slate-900 mb-4">Bid History</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-50/80 text-slate-500 uppercase tracking-wider font-semibold">
+                        <tr>
+                            <th class="py-2.5 px-3">#</th>
+                            <th class="py-2.5 px-3">User</th>
+                            <th class="py-2.5 px-3">Amount</th>
+                            <th class="py-2.5 px-3">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 font-medium">
+                        {% for b in bids %}
+                        <tr class="hover:bg-slate-50/50">
+                            <td class="py-2.5 px-3 text-slate-400">{{ forloop.counter }}</td>
+                            <td class="py-2.5 px-3 font-semibold text-slate-900">@{{ b.bidder_username|default:b.bidder_id }}</td>
+                            <td class="py-2.5 px-3 font-bold text-emerald-600">{{ active_tenant.currency }} {{ b.amount }}</td>
+                            <td class="py-2.5 px-3 text-slate-500">{{ b.placed_at|date:"d M Y, H:i:s" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" class="py-8 text-center text-slate-400">No bids placed on this auction.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Seller Information Card -->
+        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <div>
+                <h2 class="text-base font-bold text-slate-900 mb-4">Seller Information</h2>
+                <div class="divide-y divide-slate-100 text-xs space-y-2">
+                    <div class="flex justify-between pt-1">
+                        <span class="text-slate-500">Seller ID</span>
+                        <span class="font-mono text-slate-800">{{ listing.seller_id }}</span>
+                    </div>
+                    <div class="flex justify-between pt-1">
+                        <span class="text-slate-500">Username</span>
+                        <span class="font-semibold text-blue-600">@{{ listing.seller_username|default:listing.seller_id }}</span>
+                    </div>
+                    <div class="flex justify-between pt-1">
+                        <span class="text-slate-500">Tenant</span>
+                        <span class="font-semibold text-slate-800">{{ active_tenant.name }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes Card -->
+            <div class="mt-6 pt-4 border-t border-slate-100">
+                <div class="text-xs font-semibold text-slate-700 mb-2">Internal Admin Notes</div>
+                <textarea rows="3" class="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Add administrative notes..."></textarea>
+                <button type="button" onclick="alert('Note saved locally.');" class="mt-2 w-full py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition-colors">
+                    Save Note
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

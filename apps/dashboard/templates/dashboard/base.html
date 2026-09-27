@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title|default:"Dashboard" }} - AquaBid Management</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        navy: {
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#0a0f1d',
+                        },
+                        brand: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js for Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex antialiased">
+
+    <!-- Sidebar (Desktop & Tablet) -->
+    <aside id="sidebar" class="w-64 bg-slate-900 text-slate-300 flex-shrink-0 flex flex-col justify-between hidden md:flex transition-all duration-300 z-30">
+        <div>
+            <!-- Brand Logo Header -->
+            <div class="h-16 flex items-center px-6 border-b border-slate-800">
+                <a href="{% url 'dashboard:home' %}" class="flex items-center space-x-3 text-white">
+                    <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </div>
+                    <div>
+                        <div class="font-bold text-lg leading-tight tracking-tight">AquaBid</div>
+                        <div class="text-xs text-slate-400 font-medium tracking-wide">{{ active_tenant.country|default:"Unified" }}</div>
+                    </div>
+                </a>
+            </div>
+
+            <!-- Navigation Links -->
+            <nav class="p-4 space-y-1.5 text-sm font-medium overflow-y-auto max-h-[calc(100vh-140px)]">
+                <a href="{% url 'dashboard:home' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if request.resolver_match.url_name == 'home' %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+                    Dashboard
+                </a>
+
+                <a href="{% url 'dashboard:listings_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'listings' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
+                    Listings
+                </a>
+
+                <a href="{% url 'dashboard:auctions_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'auctions' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                    Auctions
+                </a>
+
+                <a href="{% url 'dashboard:bids_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'bids' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Bids
+                </a>
+
+                <a href="{% url 'dashboard:sellers_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'sellers' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    Sellers
+                </a>
+
+                <a href="{% url 'dashboard:telegram_users' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if request.resolver_match.url_name == 'telegram_users' %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    Telegram Users
+                </a>
+
+                <a href="{% url 'dashboard:transactions_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'transactions' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                    Payments
+                </a>
+
+                <a href="{% url 'dashboard:wallets_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'wallets' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    Wallet
+                </a>
+
+                <a href="{% url 'dashboard:telegram_messages' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'messages' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                    Messages
+                </a>
+
+                <a href="{% url 'dashboard:telegram_overview' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'telegram' in request.path and 'users' not in request.path and 'messages' not in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Bot Management
+                </a>
+
+                <a href="{% url 'dashboard:users_list' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'users' in request.path and 'telegram' not in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                    Users & Permissions
+                </a>
+
+                <a href="{% url 'dashboard:reports' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'reports' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    Reports
+                </a>
+
+                <a href="{% url 'dashboard:settings' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'settings' in request.path and 'telegram' not in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                    Settings
+                </a>
+
+                <a href="{% url 'dashboard:helpdesk' %}" class="flex items-center px-3 py-2.5 rounded-lg transition-colors {% if 'helpdesk' in request.path %}bg-blue-600 text-white shadow-sm{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Helpdesk
+                </a>
+            </nav>
+        </div>
+
+        <!-- Sidebar Footer Card -->
+        <div class="p-4 border-t border-slate-800">
+            <div class="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
+                <div class="text-xs text-slate-400 font-medium">Need help?</div>
+                <div class="text-xs text-slate-300 mt-0.5">Contact our support team</div>
+                <a href="{% url 'dashboard:helpdesk' %}" class="mt-2.5 block text-center py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow transition-colors">
+                    Open Support
+                </a>
+            </div>
+            <div class="text-center mt-3 text-[11px] text-slate-500 font-mono">{{ dashboard_version }}</div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+        <!-- Top Header Bar -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 sticky top-0 z-20 shadow-xs">
+            <div class="flex items-center space-x-4">
+                <!-- Mobile Sidebar Toggle -->
+                <button onclick="document.getElementById('sidebar').classList.toggle('hidden')" class="md:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+
+                <!-- Tenant Selector Dropdown -->
+                <div class="relative">
+                    <button id="tenantDropdownBtn" onclick="document.getElementById('tenantDropdown').classList.toggle('hidden')" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-medium transition-colors">
+                        <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <span>{{ active_tenant.name|default:"Select Tenant" }}</span>
+                        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div id="tenantDropdown" class="hidden absolute left-0 mt-2 w-56 rounded-xl bg-white shadow-xl border border-slate-100 py-1.5 z-50">
+                        <div class="px-3 py-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Switch Organization</div>
+                        {% for t in available_tenants %}
+                        <a href="{% url 'dashboard:switch_tenant' t.id %}" class="flex items-center justify-between px-3 py-2 text-sm {% if t.id == active_tenant.id %}bg-blue-50 text-blue-600 font-semibold{% else %}text-slate-700 hover:bg-slate-50{% endif %}">
+                            <span>{{ t.name }}</span>
+                            <span class="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">{{ t.code }}</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Bot Connection Status Pill -->
+                <div class="hidden sm:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold {% if bot_connected %}bg-emerald-50 text-emerald-700 border border-emerald-200/60{% else %}bg-slate-100 text-slate-600 border border-slate-200{% endif %}">
+                    <span class="w-2 h-2 rounded-full {% if bot_connected %}bg-emerald-500 animate-pulse{% else %}bg-slate-400{% endif %}"></span>
+                    <span>{% if bot_connected %}Bot Online{% else %}Bot Disconnected{% endif %}</span>
+                </div>
+            </div>
+
+            <!-- Top Header Right Elements -->
+            <div class="flex items-center space-x-4">
+                <!-- Notifications Bell -->
+                <a href="{% url 'dashboard:listings_list' %}?tab=pending" class="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                    {% if unread_alerts_count %}
+                    <span class="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{{ unread_alerts_count }}</span>
+                    {% endif %}
+                </a>
+
+                <!-- User Profile & Dropdown -->
+                <div class="relative">
+                    <button onclick="document.getElementById('userDropdown').classList.toggle('hidden')" class="flex items-center space-x-3 p-1 rounded-lg hover:bg-slate-100 transition-colors">
+                        <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                            {{ request.user.first_name|default:request.user.username|slice:":1"|upper }}
+                        </div>
+                        <div class="text-left hidden sm:block">
+                            <div class="text-xs font-semibold text-slate-900 leading-tight">{{ request.user.get_full_name|default:request.user.username }}</div>
+                            <div class="text-[11px] text-slate-500 font-medium">{% if request.user.is_superuser %}Admin{% else %}Staff{% endif %}</div>
+                        </div>
+                        <svg class="w-3.5 h-3.5 text-slate-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <!-- User Menu Dropdown -->
+                    <div id="userDropdown" class="hidden absolute right-0 mt-2 w-48 rounded-xl bg-white shadow-xl border border-slate-100 py-1.5 z-50">
+                        <div class="px-4 py-2 border-b border-slate-100">
+                            <div class="text-xs font-semibold text-slate-900">{{ request.user.username }}</div>
+                            <div class="text-[11px] text-slate-500 truncate">{{ request.user.email }}</div>
+                        </div>
+                        <a href="{% url 'dashboard:users_list' %}" class="block px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium">Profile & Team</a>
+                        <a href="{% url 'dashboard:settings' %}" class="block px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium">Platform Settings</a>
+                        <div class="border-t border-slate-100 my-1"></div>
+                        <a href="{% url 'dashboard:logout' %}" class="block px-4 py-2 text-xs text-red-600 hover:bg-red-50 font-semibold">Sign Out</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Flash Messages Banner -->
+        {% if messages %}
+        <div class="px-6 sm:px-8 pt-4 space-y-2">
+            {% for msg in messages %}
+            <div class="flex items-center justify-between p-3.5 rounded-xl text-sm font-medium shadow-xs {% if msg.tags == 'error' %}bg-red-50 text-red-800 border border-red-200{% elif msg.tags == 'warning' %}bg-amber-50 text-amber-800 border border-amber-200{% else %}bg-emerald-50 text-emerald-800 border border-emerald-200{% endif %}">
+                <div class="flex items-center space-x-2">
+                    {% if msg.tags == 'error' %}
+                    <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    {% else %}
+                    <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    {% endif %}
+                    <span>{{ msg }}</span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-600">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Main Body Content -->
+        <main class="flex-1 overflow-y-auto p-4 sm:p-8">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Dropdown Click Outside Dismissal -->
+    <script>
+        document.addEventListener('click', function(event) {
+            const tenantBtn = document.getElementById('tenantDropdownBtn');
+            const tenantMenu = document.getElementById('tenantDropdown');
+            if (tenantBtn && tenantMenu && !tenantBtn.contains(event.target) && !tenantMenu.contains(event.target)) {
+                tenantMenu.classList.add('hidden');
+            }
+            const userMenu = document.getElementById('userDropdown');
+            if (userMenu && !event.target.closest('#userDropdown') && !event.target.closest('button[onclick*="userDropdown"]')) {
+                userMenu.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

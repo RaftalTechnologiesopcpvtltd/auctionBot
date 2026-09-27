@@ -1,0 +1,127 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Business Settings | AquaBid{% endblock %}
+{% block page_title %}Business & Platform Settings{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl space-y-6">
+  <!-- Status alerts -->
+  {% if messages %}
+    <div class="space-y-2">
+      {% for message in messages %}
+        <div class="p-4 rounded-xl text-sm font-semibold {% if message.tags == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200{% else %}bg-rose-50 text-rose-800 border border-rose-200{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="post" action="{% url 'dashboard:settings_business' %}" class="space-y-6">
+    {% csrf_token %}
+
+    <!-- General Business Profile -->
+    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+      <div class="border-b border-slate-100 pb-4 mb-6">
+        <h3 class="text-lg font-bold text-slate-900">Organization Profile</h3>
+        <p class="text-sm text-slate-500">Legal entity information and primary operating currency for {{ active_tenant.name }}.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Company / Tenant Name</label>
+          <input type="text" name="name" value="{{ active_tenant.name }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800" required>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Tenant Slug (Immutable Key)</label>
+          <input type="text" value="{{ active_tenant.slug }}" disabled class="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-400 font-mono text-sm cursor-not-allowed">
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Operating Currency</label>
+          <input type="text" name="currency" value="{{ active_tenant.currency|default:'AUD' }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-slate-800 uppercase" maxlength="3" required>
+          <p class="text-xs text-slate-400 mt-1">ISO 4217 Currency Code (e.g. AUD, MYR, USD)</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Tenant Operational Status</label>
+          <div class="pt-2">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold {% if active_tenant.is_active %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-slate-100 text-slate-600{% endif %}">
+              <span class="w-2 h-2 rounded-full {% if active_tenant.is_active %}bg-emerald-500{% else %}bg-slate-400{% endif %}"></span>
+              {% if active_tenant.is_active %}Active & Operational{% else %}Suspended{% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telegram Bot Integration (Masked Security) -->
+    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+      <div class="border-b border-slate-100 pb-4 mb-6 flex items-center justify-between">
+        <div>
+          <h3 class="text-lg font-bold text-slate-900">Telegram Bot Configuration</h3>
+          <p class="text-sm text-slate-500">Live auction notifications and interactive bidding gateway settings.</p>
+        </div>
+        <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Webhook Active
+        </span>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Bot Username</label>
+          <div class="relative">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 font-bold">@</span>
+            <input type="text" name="bot_username" value="{{ bot_config.bot_username|default:'AquaBidBot' }}" class="w-full pl-8 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800">
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Telegram Bot Token (Strictly Masked)</label>
+            <span class="text-xs text-slate-400 font-medium">Leave blank to keep existing token unchanged</span>
+          </div>
+          <input type="password" name="bot_token" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="new-password" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-sm text-slate-800">
+          <p class="text-xs text-rose-500 font-medium mt-1.5 flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Security Warning: Plain-text tokens are never stored unencrypted or rendered in UI payloads.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Auction Rules & Bidding Defaults -->
+    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+      <div class="border-b border-slate-100 pb-4 mb-6">
+        <h3 class="text-lg font-bold text-slate-900">Auction Engine Policy</h3>
+        <p class="text-sm text-slate-500">Standard anti-sniping windows and default bidding parameters.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Default Anti-Sniping Window (Seconds)</label>
+          <input type="number" name="anti_sniping_seconds" value="300" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800">
+          <p class="text-xs text-slate-400 mt-1">Extends timer by this amount if a bid occurs in final seconds.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Platform Fee / Commission (%)</label>
+          <input type="number" step="0.1" name="commission_percent" value="5.0" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800">
+          <p class="text-xs text-slate-400 mt-1">Automatically retained on auction settlement debit/credit ledger.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center justify-end gap-3 pt-2">
+      <a href="{% url 'dashboard:home' %}" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors">
+        Cancel
+      </a>
+      <button type="submit" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+        Save Settings
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,134 @@
+{% extends "dashboard/base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header & Action -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Auctions</h1>
+            <p class="text-sm text-slate-500 mt-0.5">Manage all auctions, live and scheduled.</p>
+        </div>
+        <div>
+            <a href="{% url 'dashboard:listings_list' %}?tab=accepted" class="inline-flex items-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors">
+                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                Launch Auction
+            </a>
+        </div>
+    </div>
+
+    <!-- Status Tabs (Screen 22.jpeg) -->
+    <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3 text-xs font-semibold">
+        <a href="?tab=all" class="px-3.5 py-2 rounded-xl transition-colors {% if tab == 'all' %}bg-blue-600 text-white shadow-xs{% else %}bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80{% endif %}">
+            All <span class="ml-1.5 px-1.5 py-0.5 rounded-full {% if tab == 'all' %}bg-blue-700 text-white{% else %}bg-slate-100 text-slate-600{% endif %} text-[10px]">{{ counts.all }}</span>
+        </a>
+        <a href="?tab=live" class="px-3.5 py-2 rounded-xl transition-colors {% if tab == 'live' %}bg-blue-600 text-white shadow-xs{% else %}bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80{% endif %}">
+            Live <span class="ml-1.5 px-1.5 py-0.5 rounded-full {% if tab == 'live' %}bg-blue-700 text-white{% else %}bg-emerald-100 text-emerald-700{% endif %} text-[10px]">{{ counts.live }}</span>
+        </a>
+        <a href="?tab=scheduled" class="px-3.5 py-2 rounded-xl transition-colors {% if tab == 'scheduled' %}bg-blue-600 text-white shadow-xs{% else %}bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80{% endif %}">
+            Scheduled <span class="ml-1.5 px-1.5 py-0.5 rounded-full {% if tab == 'scheduled' %}bg-blue-700 text-white{% else %}bg-blue-100 text-blue-700{% endif %} text-[10px]">{{ counts.scheduled }}</span>
+        </a>
+        <a href="?tab=completed" class="px-3.5 py-2 rounded-xl transition-colors {% if tab == 'completed' %}bg-blue-600 text-white shadow-xs{% else %}bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80{% endif %}">
+            Completed <span class="ml-1.5 px-1.5 py-0.5 rounded-full {% if tab == 'completed' %}bg-blue-700 text-white{% else %}bg-slate-100 text-slate-600{% endif %} text-[10px]">{{ counts.completed }}</span>
+        </a>
+        <a href="?tab=cancelled" class="px-3.5 py-2 rounded-xl transition-colors {% if tab == 'cancelled' %}bg-blue-600 text-white shadow-xs{% else %}bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80{% endif %}">
+            Cancelled <span class="ml-1.5 px-1.5 py-0.5 rounded-full {% if tab == 'cancelled' %}bg-blue-700 text-white{% else %}bg-red-100 text-red-700{% endif %} text-[10px]">{{ counts.cancelled }}</span>
+        </a>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
+        <form method="GET" class="flex flex-col md:flex-row items-center gap-3">
+            <input type="hidden" name="tab" value="{{ tab }}">
+            <div class="relative flex-1 w-full">
+                <input type="text" name="q" value="{{ q }}" placeholder="Search by title, seller or ID..." class="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+            <button type="submit" class="w-full md:w-auto px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs shadow-xs transition-colors">
+                Search
+            </button>
+            <a href="{% url 'dashboard:auctions_list' %}" class="w-full md:w-auto px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors text-center">
+                Reset
+            </a>
+        </form>
+    </div>
+
+    <!-- Auctions Table (Screen 22.jpeg) -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+                    <tr>
+                        <th class="py-3.5 px-4">#</th>
+                        <th class="py-3.5 px-4">Title</th>
+                        <th class="py-3.5 px-4">Seller</th>
+                        <th class="py-3.5 px-4">Starting Price</th>
+                        <th class="py-3.5 px-4">Current Bid</th>
+                        <th class="py-3.5 px-4">Bids</th>
+                        <th class="py-3.5 px-4">Start Time</th>
+                        <th class="py-3.5 px-4">End Time</th>
+                        <th class="py-3.5 px-4">Status</th>
+                        <th class="py-3.5 px-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-slate-800 font-medium">
+                    {% for a in page_obj %}
+                    <tr class="hover:bg-slate-50/60 transition-colors">
+                        <td class="py-3.5 px-4 font-semibold text-slate-900">#{{ a.id }}</td>
+                        <td class="py-3.5 px-4 font-semibold text-slate-900">
+                            <a href="{% url 'dashboard:auction_detail' a.id %}" class="hover:text-blue-600 block max-w-xs truncate">{{ a.listing.title }}</a>
+                        </td>
+                        <td class="py-3.5 px-4 text-slate-600">@{{ a.listing.seller_username|default:a.listing.seller_id }}</td>
+                        <td class="py-3.5 px-4">{{ active_tenant.currency }} {{ a.starting_price }}</td>
+                        <td class="py-3.5 px-4 font-bold text-slate-900">
+                            {% if a.current_price %}
+                            {{ active_tenant.currency }} {{ a.current_price }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td class="py-3.5 px-4 font-semibold">{{ a.bids.count }}</td>
+                        <td class="py-3.5 px-4 text-slate-500 text-[11px]">{{ a.start_at|date:"d M, H:i" }}</td>
+                        <td class="py-3.5 px-4 text-slate-500 text-[11px]">{{ a.end_at|date:"d M, H:i" }}</td>
+                        <td class="py-3.5 px-4">
+                            <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold {% if a.status == 'ACTIVE' %}bg-emerald-50 text-emerald-700 border border-emerald-200/60{% elif a.status == 'SCHEDULED' or a.status == 'DRAFT' %}bg-blue-50 text-blue-700 border border-blue-200/60{% elif a.status == 'SOLD' %}bg-purple-50 text-purple-700 border border-purple-200/60{% elif a.status == 'CANCELLED' %}bg-red-50 text-red-700 border border-red-200/60{% else %}bg-slate-100 text-slate-600{% endif %}">
+                                {{ a.status }}
+                            </span>
+                        </td>
+                        <td class="py-3.5 px-4 text-right">
+                            <a href="{% url 'dashboard:auction_detail' a.id %}" class="inline-flex items-center px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold transition-colors">
+                                <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                View
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="py-12 text-center text-slate-400">
+                            No auctions found matching criteria.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_obj.has_other_pages %}
+        <div class="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <div>Showing page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+            <div class="flex items-center space-x-1">
+                {% if page_obj.has_previous %}
+                <a href="?page={{ page_obj.previous_page_number }}&tab={{ tab }}&q={{ q }}" class="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50">&laquo;</a>
+                {% endif %}
+                <span class="px-3 py-1 rounded bg-blue-600 text-white font-semibold">{{ page_obj.number }}</span>
+                {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}&tab={{ tab }}&q={{ q }}" class="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50">&raquo;</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

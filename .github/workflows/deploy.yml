@@ -70,6 +70,8 @@ jobs:
 
             echo "=== [5/6] Starting services ==="
             docker compose -f docker-compose.prod.yml up -d
+            echo "Restarting Nginx to reload upstream configuration..."
+            docker compose -f docker-compose.prod.yml restart nginx
 
             echo "=== [6/6] Running database migrations & collectstatic ==="
             docker compose -f docker-compose.prod.yml exec -T web python manage.py migrate --noinput
@@ -77,10 +79,17 @@ jobs:
 
             echo "=== Deployment Health Check ==="
             sleep 5
+            # 1. Direct Web Application Check
             docker compose -f docker-compose.prod.yml exec -T web python -c "
             import urllib.request
             resp = urllib.request.urlopen('http://127.0.0.1:8000/health/')
-            assert resp.getcode() == 200, f'Health check returned {resp.getcode()}'
-            print('Production health endpoint: HEALTHY')
+            assert resp.getcode() == 200, f'Internal health check returned {resp.getcode()}'
+            print('Production internal web health: HEALTHY')
             "
+
+            # 2. End-to-End Nginx Reverse Proxy Integration Check
+            docker compose -f docker-compose.prod.yml exec -T nginx wget -qO- --header="Host: auctionbot.shop" http://127.0.0.1/health/
+            echo ""
+            echo "Production Nginx reverse proxy integration: HEALTHY"
             echo "Deployment completed successfully."
+

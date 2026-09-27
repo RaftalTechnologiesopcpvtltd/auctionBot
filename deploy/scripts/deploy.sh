@@ -47,6 +47,8 @@ done
 # 5. Bring up web and worker services
 echo "[+] Step 3/5: Launching web application, celery worker, and nginx..."
 $DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d web worker nginx
+echo "[+] Restarting Nginx to refresh upstream host resolution..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" restart nginx
 
 # 6. Apply database migrations & collect static files
 echo "[+] Step 4/5: Running database migrations against production database..."
@@ -72,12 +74,17 @@ except Exception as e:
 ")
 
 if [[ "$HEALTH_OUTPUT" == *"HEALTH_OK"* ]]; then
-  echo "=================================================="
-  echo "[✓] DEPLOYMENT SUCCESSFUL: System is HEALTHY."
-  echo "=================================================="
-  exit 0
+  echo "[+] Django internal health: OK"
 else
-  echo "[-] CRITICAL: Health check returned non-healthy response: $HEALTH_OUTPUT"
+  echo "[-] CRITICAL: Web health check returned non-healthy response: $HEALTH_OUTPUT"
   echo "[-] Inspect container logs via: $DOCKER_COMPOSE -f $COMPOSE_FILE logs"
   exit 1
 fi
+
+echo "[+] Verifying Nginx reverse proxy end-to-end integration..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" exec -T nginx wget -qO- --header="Host: auctionbot.shop" http://127.0.0.1/health/
+
+echo "=================================================="
+echo "[✓] DEPLOYMENT SUCCESSFUL: System is HEALTHY."
+echo "=================================================="
+exit 0

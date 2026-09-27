@@ -18,7 +18,7 @@ allowed_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS")
 if not allowed_hosts_raw:
     raise ValueError("DJANGO_ALLOWED_HOSTS must be explicitly defined in production.")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
-for default_host in [".auctionbot.shop", "auctionbot.shop"]:
+for default_host in [".auctionbot.shop", "auctionbot.shop", "72.62.248.151", "localhost", "127.0.0.1", "web"]:
     if default_host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(default_host)
 
@@ -40,9 +40,14 @@ for default_origin in [
     "https://*.auctionbot.shop",
     "http://auctionbot.shop",
     "https://auctionbot.shop",
+    "http://72.62.248.151",
+    "https://72.62.248.151",
+    "http://localhost",
+    "http://127.0.0.1",
 ]:
     if default_origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(default_origin)
+
 
 # Production Logging (Console stream for containerized / 12-factor log management)
 LOGGING["root"]["level"] = "WARNING"  # noqa: F405

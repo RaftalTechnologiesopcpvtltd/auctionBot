@@ -31,6 +31,7 @@ docker compose -f "$COMPOSE_FILE" build web worker
 
 echo "[!] Restarting services with rollback version..."
 docker compose -f "$COMPOSE_FILE" up -d web worker nginx
+docker compose -f "$COMPOSE_FILE" restart nginx
 
 echo "[!] Running collectstatic for rollback version..."
 docker compose -f "$COMPOSE_FILE" exec -T web python manage.py collectstatic --noinput
@@ -40,8 +41,12 @@ docker compose -f "$COMPOSE_FILE" exec -T web python -c "
 import urllib.request
 resp = urllib.request.urlopen('http://127.0.0.1:8000/health/')
 assert resp.getcode() == 200
-print('Rollback health check verified.')
+print('Rollback web health check verified.')
 "
+docker compose -f "$COMPOSE_FILE" exec -T nginx wget -qO- --header="Host: auctionbot.shop" http://127.0.0.1/health/
+echo "Rollback Nginx integration health check verified."
+
+
 
 echo "=================================================="
 echo "[✓] ROLLBACK COMPLETE: Application running on $TARGET_REF"

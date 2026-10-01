@@ -3,7 +3,8 @@ import json
 from unittest.mock import MagicMock, patch
 from django.test import TestCase, Client
 from apps.tenants.models import Tenant
-from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, TelegramUpdateLog, BotType
+from apps.listings.models import Listing
+from apps.telegram_engine.models import TelegramBotConfig, TelegramUser, TelegramUpdateLog, TelegramConversationState, BotType
 from apps.telegram_engine.security import encrypt_token, decrypt_token, mask_token
 from apps.telegram_engine.dispatcher import TelegramDispatcher
 from services.telegram import TelegramService, TelegramServiceError
@@ -1055,6 +1056,82 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         self.assertEqual(created_listing.status, ListingStatus.PENDING)
         self.assertEqual(created_listing.quantity, 2)
         self.assertEqual(created_listing.images.count(), 1)
+
+    def test_seller_listing_wizard_with_video_upload(self):
+        """Tests that uploading a video during the wizard stores video metadata."""
+        user, _ = TelegramUser.objects.get_or_create(
+            tenant=self.tenant_my,
+            telegram_user_id=self.buyer_user_id,
+            defaults={"chat_id": self.chat_id, "username": "seller_test"}
+        )
+        conv, _ = TelegramConversationState.objects.get_or_create(
+            tenant=self.tenant_my,
+            telegram_user=user,
+            bot_type="SELLER",
+            defaults={"state": "PICTURE", "step": "PICTURE", "context_data": {
+                "category": "Auction",
+                "breed": "Flowerhorn",
+                "title": "King Kamfa",
+                "description": "Premium fish",
+                "quantity": 1,
+                "contact": "Seller Contact",
+                "starting_price": 50,
+                "min_bid": 10,
+                "pictures": ["photo_file_abc"],
+            }}
+        )
+        conv.step = "VIDEO"
+        conv.context_data = {
+            "category": "Auction",
+            "breed": "Flowerhorn",
+            "title": "King Kamfa",
+            "description": "Premium fish",
+            "quantity": 1,
+            "contact": "Seller Contact",
+            "starting_price": 50,
+            "min_bid": 10,
+            "pictures": ["photo_file_abc"],
+        }
+        conv.save()
+
+        # Send Video Update
+        video_update = {
+            "message": {
+                "message_id": 99,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "username": "seller_test"},
+                "video": {"file_id": "video_file_xyz", "file_size": 2048000},
+            }
+        }
+        self.dispatcher_seller_my.dispatch(video_update)
+
+        created_listing = Listing.objects.filter(tenant=self.tenant_my, title="King Kamfa").first()
+        self.assertIsNotNone(created_listing)
+        self.assertEqual(created_listing.images.count(), 1)
+        self.assertEqual(created_listing.images.first().telegram_file_id, "photo_file_abc")
+        self.assertEqual(created_listing.metadata.get("video_file_id"), "video_file_xyz")
+
+    def test_telegram_service_photo_and_video(self):
+        """Tests that send_photo and send_video in TelegramService format API payloads correctly."""
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = {"ok": True, "result": {"message_id": 123}}
+
+        svc = TelegramService(self.seller_bot_my, http_client=mock_client)
+        self.seller_bot_my.set_token("TEST_TOKEN_123")
+        self.seller_bot_my.save()
+
+        # Test send_photo with file_id
+        res_photo = svc.send_photo(chat_id=12345, photo="file_id_photo", caption="Test photo")
+        self.assertTrue(res_photo.get("ok"))
+        mock_client.post.assert_called()
+        self.assertEqual(mock_client.post.call_args[1]["json"]["photo"], "file_id_photo")
+        self.assertEqual(mock_client.post.call_args[1]["json"]["caption"], "Test photo")
+
+        # Test send_video with file_id
+        res_video = svc.send_video(chat_id=12345, video="file_id_video", caption="Test video")
+        self.assertTrue(res_video.get("ok"))
+        self.assertEqual(mock_client.post.call_args[1]["json"]["video"], "file_id_video")
+        self.assertEqual(mock_client.post.call_args[1]["json"]["caption"], "Test video")
 
 
 

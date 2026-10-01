@@ -7,9 +7,11 @@ Underneath the identical legacy Telegram UX:
 - Persistent recoverable conversation states via TelegramConversationState.
 """
 import logging
+import os
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+from django.conf import settings
 from django.utils import timezone
 from django.utils.timezone import localtime
 
@@ -351,17 +353,36 @@ class BuyerWorkflow:
 
         # 1. Send photos if available, else send text caption
         images = list(listing.images.filter(tenant=self.tenant).order_by("order"))
-        if images and images[0].telegram_file_id:
-            try:
-                self.telegram_service.send_photo(
-                    chat_id=chat_id,
-                    photo=images[0].telegram_file_id,
-                    caption=caption_text,
-                )
-            except Exception as exc:
-                logger.warning("Could not send photo for listing #%s: %s", listing.id, exc)
-                self.telegram_service.send_message(chat_id=chat_id, text=caption_text)
-        else:
+        photo_sent = False
+        if images:
+            first_img = images[0]
+            if first_img.image:
+                try:
+                    media_root = getattr(settings, "MEDIA_ROOT", "media")
+                    local_path = os.path.join(media_root, str(first_img.image))
+                    if os.path.exists(local_path):
+                        with open(local_path, "rb") as pf:
+                            self.telegram_service.send_photo(
+                                chat_id=chat_id,
+                                photo=pf,
+                                caption=caption_text,
+                            )
+                            photo_sent = True
+                except Exception as exc:
+                    logger.warning("Failed sending local image file for listing #%s: %s", listing.id, exc)
+
+            if not photo_sent and first_img.telegram_file_id:
+                try:
+                    self.telegram_service.send_photo(
+                        chat_id=chat_id,
+                        photo=first_img.telegram_file_id,
+                        caption=caption_text,
+                    )
+                    photo_sent = True
+                except Exception as exc:
+                    logger.warning("Could not send photo via file_id for listing #%s: %s", listing.id, exc)
+
+        if not photo_sent:
             self.telegram_service.send_message(chat_id=chat_id, text=caption_text)
 
         # 2. Description
@@ -374,11 +395,30 @@ class BuyerWorkflow:
         else:
             buttons = BuyerKeyboards.create_bid_button(listing.id, has_bids=has_bids)
 
-        self.telegram_service.send_message(
-            chat_id=chat_id,
-            text=BuyerMessages.NO_VIDEO_AVAILABLE,
-            reply_markup=buttons,
-        )
+        video_rel = listing.metadata.get("video") if isinstance(listing.metadata, dict) else None
+        video_sent = False
+        if video_rel:
+            try:
+                media_root = getattr(settings, "MEDIA_ROOT", "media")
+                local_video_path = os.path.join(media_root, str(video_rel))
+                if os.path.exists(local_video_path):
+                    with open(local_video_path, "rb") as vf:
+                        self.telegram_service.send_video(
+                            chat_id=chat_id,
+                            video=vf,
+                            caption=BuyerMessages.ITEM_VIDEO_CAPTION,
+                            reply_markup=buttons,
+                        )
+                        video_sent = True
+            except Exception as exc:
+                logger.warning("Failed sending local video file for listing #%s: %s", listing.id, exc)
+
+        if not video_sent:
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=BuyerMessages.NO_VIDEO_AVAILABLE,
+                reply_markup=buttons,
+            )
 
         # 4. Divider
         self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.DIVIDER)

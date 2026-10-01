@@ -641,6 +641,13 @@ class SellerWorkflow:
             )
             return {"handled": True, "action": "video_too_large"}
 
+        file_id = video_data.get("file_id")
+        ctx = conv.context_data or {}
+        if file_id:
+            ctx["video"] = file_id
+            conv.context_data = ctx
+            conv.save(update_fields=["context_data", "updated_at"])
+
         return self._finalize_listing(user, chat_id)
 
     def _finalize_listing(self, user: TelegramUser, chat_id: int) -> Dict[str, Any]:
@@ -699,13 +706,57 @@ class SellerWorkflow:
             },
         )
 
-        # Attach images
+        # Attach images and download to media if possible
+        media_root = getattr(settings, "MEDIA_ROOT", "media")
         for idx, file_id in enumerate(pictures):
+            file_rel_path = ""
+            try:
+                if hasattr(self.telegram_service, "get_file"):
+                    file_info = self.telegram_service.get_file(file_id)
+                    if file_info and file_info.get("ok"):
+                        tg_file_path = file_info.get("result", {}).get("file_path")
+                        if tg_file_path:
+                            ext = os.path.splitext(tg_file_path)[1] or ".jpg"
+                            dest_filename = f"{uuid.uuid4().hex}{ext}"
+                            dest_dir = os.path.join(media_root, "listings", str(self.tenant.id))
+                            os.makedirs(dest_dir, exist_ok=True)
+                            dest_path = os.path.join(dest_dir, dest_filename)
+                            self.telegram_service.download_file(tg_file_path, dest_path)
+                            file_rel_path = f"listings/{self.tenant.id}/{dest_filename}"
+            except Exception as exc:
+                logger.warning("Could not download telegram image %s: %s", file_id, exc)
+
             attach_listing_image(
                 listing=listing,
+                image=file_rel_path if file_rel_path else None,
+                file_url=file_rel_path,
                 telegram_file_id=file_id,
                 order=idx,
             )
+
+        # Process and download video if uploaded
+        video_file_id = ctx.get("video")
+        if video_file_id:
+            video_rel_path = ""
+            try:
+                if hasattr(self.telegram_service, "get_file"):
+                    file_info = self.telegram_service.get_file(video_file_id)
+                    if file_info and file_info.get("ok"):
+                        tg_file_path = file_info.get("result", {}).get("file_path")
+                        if tg_file_path:
+                            ext = os.path.splitext(tg_file_path)[1] or ".mp4"
+                            dest_filename = f"{uuid.uuid4().hex}{ext}"
+                            dest_dir = os.path.join(media_root, "videos", str(self.tenant.id))
+                            os.makedirs(dest_dir, exist_ok=True)
+                            dest_path = os.path.join(dest_dir, dest_filename)
+                            self.telegram_service.download_file(tg_file_path, dest_path)
+                            video_rel_path = f"videos/{self.tenant.id}/{dest_filename}"
+            except Exception as exc:
+                logger.warning("Could not download telegram video %s: %s", video_file_id, exc)
+
+            listing.metadata["video"] = video_rel_path
+            listing.metadata["video_file_id"] = video_file_id
+            listing.save(update_fields=["metadata", "updated_at"])
 
         # Reset state
         conv.state = "IDLE"

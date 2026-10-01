@@ -56,10 +56,25 @@ class TelegramService:
             )
         return f"{self.BASE_URL}{token}/{method}"
 
-    def _execute_api_call(self, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_api_call(
+        self,
+        method: str,
+        payload: Dict[str, Any],
+        files: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         url = self._get_api_url(method)
         try:
-            response = self.http_client.post(url, json=payload, timeout=10)
+            if files:
+                import json
+                data_payload = {}
+                for k, v in payload.items():
+                    if isinstance(v, (dict, list)):
+                        data_payload[k] = json.dumps(v)
+                    elif v is not None:
+                        data_payload[k] = str(v)
+                response = self.http_client.post(url, data=data_payload, files=files, timeout=30)
+            else:
+                response = self.http_client.post(url, json=payload, timeout=10)
             data = response.json()
             if not data.get("ok"):
                 logger.error(
@@ -94,6 +109,56 @@ class TelegramService:
         if reply_markup:
             payload["reply_markup"] = reply_markup
         return self._execute_api_call("sendMessage", payload)
+
+    def send_photo(
+        self,
+        chat_id: int,
+        photo: Any,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Send a photo via file_id/URL or local file object."""
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "parse_mode": parse_mode,
+        }
+        if caption:
+            payload["caption"] = caption
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        if isinstance(photo, str):
+            payload["photo"] = photo
+            return self._execute_api_call("sendPhoto", payload)
+        else:
+            files = {"photo": photo}
+            return self._execute_api_call("sendPhoto", payload, files=files)
+
+    def send_video(
+        self,
+        chat_id: int,
+        video: Any,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Send a video via file_id/URL or local file object."""
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "parse_mode": parse_mode,
+        }
+        if caption:
+            payload["caption"] = caption
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        if isinstance(video, str):
+            payload["video"] = video
+            return self._execute_api_call("sendVideo", payload)
+        else:
+            files = {"video": video}
+            return self._execute_api_call("sendVideo", payload, files=files)
 
     def edit_message_text(
         self,

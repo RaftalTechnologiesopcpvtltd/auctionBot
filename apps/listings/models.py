@@ -104,6 +104,30 @@ class Listing(TenantOwnedModel):
     def __str__(self):
         return f"[{self.tenant.code}] {self.title} (#{self.id})"
 
+    @property
+    def image_url(self) -> str:
+        """Returns URL of the primary image if available."""
+        img = self.images.order_by("order").first()
+        if not img:
+            return ""
+        if img.image:
+            try:
+                return img.image.url
+            except Exception:
+                pass
+        if img.file_url:
+            return f"/media/{img.file_url}" if not img.file_url.startswith("/") else img.file_url
+        return ""
+
+    @property
+    def video_url(self) -> str:
+        """Returns URL of attached video if available."""
+        if isinstance(self.metadata, dict):
+            vid = self.metadata.get("video")
+            if vid:
+                return f"/media/{vid}" if not vid.startswith("/") else vid
+        return ""
+
 
 class SellerStatus(models.TextChoices):
     PENDING = "PENDING", "Pending Approval"

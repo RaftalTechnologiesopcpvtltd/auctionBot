@@ -237,3 +237,14 @@ class SellerKeyboards:
                 [{"text": "Enter Payment Details", "callback_data": f"give_payment_details_{user_id}"}]
             ]
         }
+
+    @staticmethod
+    def confirm_payment() -> Dict[str, Any]:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Submit", "callback_data": "submit_yes_payment"},
+                    {"text": "Cancel", "callback_data": "cancel_no_payment"},
+                ]
+            ]
+        }

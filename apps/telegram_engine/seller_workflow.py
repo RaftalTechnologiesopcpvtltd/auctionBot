@@ -45,6 +45,8 @@ class SellerWorkflowStep:
     PICTURE = "PICTURE"
     VIDEO = "VIDEO"
     WALLET_AMOUNT = "WALLET_AMOUNT"
+    GET_PAYMENT_DETAILS = "GET_PAYMENT_DETAILS"
+    CONFIRM_PAYMENT = "CONFIRM_PAYMENT"
 
 
 class SellerWorkflow:
@@ -173,7 +175,13 @@ class SellerWorkflow:
             return {"handled": True, "action": "sold_items"}
 
         elif text_clean == "My Wallet":
-            balance = 0
+            from apps.finance.models import FinancialAccount, AccountType
+            account = FinancialAccount.objects.filter(
+                tenant=self.tenant,
+                owner_id=str(user.telegram_user_id),
+                account_type=AccountType.USER_WALLET,
+            ).first()
+            balance = account.available_balance if account else Decimal("0.00")
             self.telegram_service.send_message(
                 chat_id=chat_id,
                 text=SellerMessages.WALLET_DETAILS_HEADER.format(balance=balance),
@@ -389,6 +397,13 @@ class SellerWorkflow:
             )
             return {"handled": True, "action": "prompt_picture"}
 
+        elif step == SellerWorkflowStep.GET_PAYMENT_DETAILS:
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text="Please send a valid payment proof image.",
+            )
+            return {"handled": True, "action": "prompt_payment_proof_valid"}
+
         # Default fallback
         self.telegram_service.send_message(
             chat_id=chat_id,
@@ -541,6 +556,8 @@ class SellerWorkflow:
 
         # 7. Add seller money
         elif data.startswith("add_seller_money_"):
+            conv.step = SellerWorkflowStep.WALLET_AMOUNT
+            conv.save(update_fields=["step", "updated_at"])
             self.telegram_service.send_message(
                 chat_id=chat_id,
                 text=SellerMessages.ADD_MONEY_PROMPT,
@@ -550,6 +567,11 @@ class SellerWorkflow:
 
         elif data.startswith("wallet_amount_save_"):
             amt = data.split("_")[-1]
+            ctx["amount_to_add"] = amt
+            conv.step = SellerWorkflowStep.WALLET_AMOUNT
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
             bank_details = getattr(self.tenant, "metadata", {}).get("bank_details") or "Maybank 512345678901 CYG Aquatics"
             msg = SellerMessages.PAYMENT_INSTRUCTIONS.format(amount=amt, bank_details=bank_details)
             self.telegram_service.send_message(
@@ -558,6 +580,51 @@ class SellerWorkflow:
                 reply_markup=SellerKeyboards.enter_payment_details(user.telegram_user_id),
             )
             return {"handled": True, "action": "wallet_payment_instructions"}
+
+        elif data.startswith("give_payment_details_"):
+            conv.step = SellerWorkflowStep.GET_PAYMENT_DETAILS
+            conv.save(update_fields=["step", "updated_at"])
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.ATTACH_PAYMENT_PROOF,
+            )
+            return {"handled": True, "action": "prompt_payment_proof"}
+
+        elif data == "submit_yes_payment":
+            amount_to_add = ctx.get("amount_to_add", "10")
+            photo_path = ctx.get("payment_proof_image", "")
+            from apps.finance.services import deposit
+            try:
+                deposit(
+                    tenant=self.tenant,
+                    user_id=str(user.telegram_user_id),
+                    amount=Decimal(amount_to_add),
+                    currency=getattr(self.tenant, "currency", "MYR") or "MYR",
+                    description=f"Seller wallet deposit via Telegram proof {photo_path}",
+                    metadata={"payment_proof": photo_path, "username": user.username or ""}
+                )
+            except Exception as e:
+                logger.error("Failed to deposit funds for user %s: %s", user.telegram_user_id, e)
+
+            conv.step = SellerWorkflowStep.IDLE
+            conv.context_data = {}
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.PAYMENT_SUBMITTED_SUCCESS,
+            )
+            return {"handled": True, "action": "submitted_payment"}
+
+        elif data == "cancel_no_payment":
+            conv.step = SellerWorkflowStep.GET_PAYMENT_DETAILS
+            conv.save(update_fields=["step", "updated_at"])
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.ATTACH_PAYMENT_PROOF,
+                reply_markup=SellerKeyboards.enter_payment_details(user.telegram_user_id),
+            )
+            return {"handled": True, "action": "cancelled_payment"}
 
         # 8. Start trigger
         elif data == "trigger_start":
@@ -576,8 +643,45 @@ class SellerWorkflow:
         photo_sizes: List[Dict[str, Any]],
         caption: str = "",
     ) -> Dict[str, Any]:
-        """Handles picture upload in listing wizard."""
+        """Handles picture upload in listing wizard and wallet payment flow."""
         conv = self._get_conversation_state(user)
+
+        # 1. Handle Payment Proof in GET_PAYMENT_DETAILS step
+        if conv.step == SellerWorkflowStep.GET_PAYMENT_DETAILS:
+            largest_photo = max(photo_sizes, key=lambda p: p.get("file_size", 0))
+            file_id = largest_photo.get("file_id")
+            media_root = getattr(settings, "MEDIA_ROOT", "media")
+            file_rel_path = ""
+            if file_id:
+                try:
+                    if hasattr(self.telegram_service, "get_file"):
+                        file_info = self.telegram_service.get_file(file_id)
+                        if file_info and file_info.get("ok"):
+                            tg_file_path = file_info.get("result", {}).get("file_path")
+                            if tg_file_path:
+                                ext = os.path.splitext(tg_file_path)[1] or ".jpg"
+                                dest_filename = f"{uuid.uuid4().hex}{ext}"
+                                dest_dir = os.path.join(media_root, "photos", "payment_proofs")
+                                os.makedirs(dest_dir, exist_ok=True)
+                                dest_path = os.path.join(dest_dir, dest_filename)
+                                self.telegram_service.download_file(tg_file_path, dest_path)
+                                file_rel_path = f"photos/payment_proofs/{dest_filename}"
+                except Exception as exc:
+                    logger.warning("Could not download payment proof image %s: %s", file_id, exc)
+
+            ctx = conv.context_data or {}
+            ctx["payment_proof_image"] = file_rel_path or file_id
+            conv.step = SellerWorkflowStep.CONFIRM_PAYMENT
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.CONFIRM_PAYMENT_PROMPT,
+                reply_markup=SellerKeyboards.confirm_payment(),
+            )
+            return {"handled": True, "action": "received_payment_proof", "payment_proof": file_rel_path or file_id}
+
         if conv.step != SellerWorkflowStep.PICTURE:
             return {"handled": False, "reason": "not_in_picture_step"}
 

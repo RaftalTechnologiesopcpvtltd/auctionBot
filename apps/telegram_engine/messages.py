@@ -90,5 +90,9 @@ class SellerMessages:
     WALLET_DETAILS_HEADER = "Wallet Details:\n\nCurrent Balance: ${balance}"
     ADD_MONEY_PROMPT = "How much money would you like to add?\n/cancel "
     PAYMENT_INSTRUCTIONS = "Please make your payment of ${amount} as soon as possible:\n\nBank Details: \n{bank_details}.\n\nAfter making the payment please send your payment details here (like Transaction ID).\n/cancel"
+    ATTACH_PAYMENT_PROOF = "Please attach your payment proof image."
+    CONFIRM_PAYMENT_PROMPT = " Confirm payment details:"
+    PAYMENT_SUBMITTED_SUCCESS = "Thank you! Your payment details have been received and saved.\nYou will be notified once it is approved, and the amount will be credited to your wallet.\n/start"
     PROCESS_CANCELLED = "Process Cancelled. \nYou can start again by using /start.\nOr use /cancel to cancel any process."
     HELPDESK_TICKET_SUBMITTED = "Thank you! Your helpdesk ticket has been submitted."
+

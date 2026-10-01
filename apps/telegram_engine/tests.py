@@ -1133,5 +1133,103 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         self.assertEqual(mock_client.post.call_args[1]["json"]["video"], "file_id_video")
         self.assertEqual(mock_client.post.call_args[1]["json"]["caption"], "Test video")
 
+    def test_seller_wallet_topup_flow(self):
+        """End-to-end test of the seller wallet top-up flow from legacy fish_registration.py."""
+        from apps.finance.models import FinancialAccount, AccountType
+        from decimal import Decimal
+
+        # 1. User taps "My Wallet"
+        wallet_msg = {
+            "message": {
+                "message_id": 1,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "text": "My Wallet",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(wallet_msg)
+        self.assertEqual(res["action"], "my_wallet")
+
+        # 2. User taps "Add Money"
+        add_money_cb = {
+            "callback_query": {
+                "id": "cb1",
+                "chat_instance": "ci1",
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "message": {"chat": {"id": self.chat_id}, "message_id": 2},
+                "data": f"add_seller_money_{self.buyer_user_id}",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(add_money_cb)
+        self.assertEqual(res["action"], "wallet_amounts")
+
+        # 3. User chooses $50
+        amount_cb = {
+            "callback_query": {
+                "id": "cb2",
+                "chat_instance": "ci2",
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "message": {"chat": {"id": self.chat_id}, "message_id": 3},
+                "data": "wallet_amount_save_50",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(amount_cb)
+        self.assertEqual(res["action"], "wallet_payment_instructions")
+
+        # 4. User taps "Enter Payment Details"
+        give_details_cb = {
+            "callback_query": {
+                "id": "cb3",
+                "chat_instance": "ci3",
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "message": {"chat": {"id": self.chat_id}, "message_id": 4},
+                "data": f"give_payment_details_{self.buyer_user_id}",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(give_details_cb)
+        self.assertEqual(res["action"], "prompt_payment_proof")
+
+        # 5. User uploads payment proof photo
+        photo_update = {
+            "message": {
+                "message_id": 5,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "photo": [
+                    {"file_id": "payment_proof_photo_123", "file_size": 10240, "width": 800, "height": 600}
+                ],
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(photo_update)
+        self.assertEqual(res["action"], "received_payment_proof")
+
+        # 6. User clicks "Submit" (submit_yes_payment)
+        submit_cb = {
+            "callback_query": {
+                "id": "cb4",
+                "chat_instance": "ci4",
+                "from": {"id": self.buyer_user_id, "username": "seller_wallet_test"},
+                "message": {"chat": {"id": self.chat_id}, "message_id": 6},
+                "data": "submit_yes_payment",
+            }
+        }
+        res = self.dispatcher_seller_my.dispatch(submit_cb)
+        self.assertEqual(res["action"], "submitted_payment")
+
+        # Verify wallet balance in FinancialAccount
+        account = FinancialAccount.objects.filter(
+            tenant=self.tenant_my,
+            owner_id=str(self.buyer_user_id),
+            account_type=AccountType.USER_WALLET,
+        ).first()
+        self.assertIsNotNone(account)
+        self.assertEqual(account.available_balance, Decimal("50.00"))
+
+        # Verify conversation state is reset to IDLE
+        user = TelegramUser.objects.get(tenant=self.tenant_my, telegram_user_id=self.buyer_user_id)
+        conv = TelegramConversationState.objects.get(tenant=self.tenant_my, telegram_user=user, bot_type=BotType.SELLER)
+        self.assertEqual(conv.step, "IDLE")
+
+
 
 

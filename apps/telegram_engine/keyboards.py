@@ -129,6 +129,18 @@ class BuyerKeyboards:
             ]
         }
 
+    @staticmethod
+    def confirm_offer(offer_price: Any, listing_id: int) -> Dict[str, Any]:
+        """Exact confirmation buttons for auction offer."""
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Yes", "callback_data": f"auction_confirm_autoaccept_offer_yes_{offer_price}_{listing_id}"},
+                    {"text": "No", "callback_data": f"auction_confirm_autoaccept_offer_no_{offer_price}_{listing_id}"},
+                ]
+            ]
+        }
+
 
 class SellerKeyboards:
     """Exact keyboards from fish_registration.py."""
@@ -248,3 +260,16 @@ class SellerKeyboards:
                 ]
             ]
         }
+
+    @staticmethod
+    def offer_response(listing_id: int, buyer_id: int, offer_price: Any) -> Dict[str, Any]:
+        """Exact Accept / Reject buttons sent to seller for an offer."""
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Accept", "callback_data": f"accept_auction_offer_{listing_id}_{buyer_id}_{offer_price}"},
+                    {"text": "Reject", "callback_data": f"reject_auction_offer_{listing_id}_{buyer_id}_{offer_price}"},
+                ]
+            ]
+        }
+

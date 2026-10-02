@@ -42,6 +42,14 @@ class BuyerMessages:
     DIVIDER = "____________________________________________________________"
     LISTING_CLOSED = "Listing closed."
     LISTING_NOT_FOUND = "Listing not found."
+    OFFER_PRICE_PROMPT = "Offer price:\n\n/cancel"
+    OFFER_BID_ALREADY_EXISTS = "Offer cannot be sent as bid is already placed."
+    OFFER_SENT_SUCCESS = "Thank you! Your offer has been sent to Seller."
+    OFFER_AUTO_ACCEPTED = "Thank you! Your offer of ${amount} has been auto-accepted."
+    CONFIRM_OFFER_PROMPT = "Confirm ?"
+    INVALID_OFFER_AMOUNT = "Please enter a valid amount(except 0):"
+    INVALID_NUMBER_PROMPT = "Please enter a valid number for the offer price without any characters.\n\n/cancel"
+    PURCHASE_CANCELLED = "Purchase cancelled."
 
 
 class SellerMessages:

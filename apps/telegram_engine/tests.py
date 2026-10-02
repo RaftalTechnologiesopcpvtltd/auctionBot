@@ -1230,6 +1230,215 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         conv = TelegramConversationState.objects.get(tenant=self.tenant_my, telegram_user=user, bot_type=BotType.SELLER)
         self.assertEqual(conv.step, "IDLE")
 
+    def test_make_offer_when_bid_exists_is_blocked(self):
+        """Make Offer button must be blocked if an auction already has bids placed."""
+        from decimal import Decimal
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import Auction, AuctionStatus
+        from apps.telegram_engine.messages import BuyerMessages
+        from django.utils import timezone
+
+        listing_my = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="1091665905",
+            seller_username="SellerBoss",
+            title="Super Red Arowana",
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+            metadata={"starting_price": "100", "auto_accept_price": "150"},
+        )
+        auction_my = Auction.objects.create(
+            tenant=self.tenant_my,
+            listing=listing_my,
+            starting_price=Decimal("100.00"),
+            bid_increment=Decimal("10.00"),
+            current_price=Decimal("0.00"),
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        # 1. Place a bid on the active auction
+        self.mock_tg_svc.reset_mock()
+        self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb_bid",
+                "from": {"id": self.buyer_user_id, "username": "offer_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"bid_amount_{listing_my.id}_10",
+            }
+        })
+
+        # 2. Try to make offer
+        self.mock_tg_svc.reset_mock()
+        res = self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb_offer",
+                "from": {"id": self.buyer_user_id, "username": "offer_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"make_auction_offer_{listing_my.id}",
+            }
+        })
+        self.assertEqual(res["action"], "bid_already_placed")
+        call = self.mock_tg_svc.send_message.call_args[1]
+        self.assertEqual(call["text"], BuyerMessages.OFFER_BID_ALREADY_EXISTS)
+
+    def test_make_offer_auto_accept_flow(self):
+        """Offer at or above auto_accept_price instantly closes auction and sells to buyer."""
+        from decimal import Decimal
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import Auction, AuctionStatus
+        from django.utils import timezone
+
+        listing_my = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="1091665905",
+            seller_username="SellerBoss",
+            title="Super Red Arowana",
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+            metadata={"starting_price": "100", "auto_accept_price": "150", "contact": "+6011112222"},
+        )
+        auction_my = Auction.objects.create(
+            tenant=self.tenant_my,
+            listing=listing_my,
+            starting_price=Decimal("100.00"),
+            bid_increment=Decimal("10.00"),
+            current_price=Decimal("0.00"),
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        # 1. Click Make Offer
+        self.mock_tg_svc.reset_mock()
+        res = self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb1",
+                "from": {"id": self.buyer_user_id, "username": "auto_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"make_auction_offer_{listing_my.id}",
+            }
+        })
+        self.assertEqual(res["action"], "waiting_offer_price")
+
+        # 2. Enter offer price = 150
+        self.mock_tg_svc.reset_mock()
+        res = self.dispatcher_buyer_my.dispatch({
+            "message": {
+                "message_id": 101,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "username": "auto_buyer"},
+                "text": "150",
+            }
+        })
+        self.assertEqual(res["action"], "prompt_confirm_offer")
+
+        # 3. Confirm offer (Yes)
+        self.mock_tg_svc.reset_mock()
+        res = self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb2",
+                "from": {"id": self.buyer_user_id, "username": "auto_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"auction_confirm_autoaccept_offer_yes_150_{listing_my.id}",
+            }
+        })
+        self.assertEqual(res["action"], "offer_auto_accepted")
+
+        # Check auction and listing state
+        auction_my.refresh_from_db()
+        listing_my.refresh_from_db()
+        self.assertEqual(auction_my.status, AuctionStatus.SOLD)
+        self.assertEqual(auction_my.winning_price, Decimal("150.00"))
+        self.assertEqual(auction_my.winner_id, str(self.buyer_user_id))
+        self.assertEqual(listing_my.status, ListingStatus.CLOSED)
+
+    def test_make_offer_seller_manual_accept_and_reject(self):
+        """Offer below auto_accept_price is sent to seller, who can accept or reject."""
+        from decimal import Decimal
+        from apps.listings.models import Listing, ListingStatus, ListingType
+        from apps.bidding.models import Auction, AuctionStatus
+        from django.utils import timezone
+
+        listing_my = Listing.objects.create(
+            tenant=self.tenant_my,
+            seller_id="1091665905",
+            seller_username="SellerBoss",
+            title="Super Red Arowana",
+            status=ListingStatus.APPROVED,
+            listing_type=ListingType.AUCTION,
+            metadata={"starting_price": "100", "auto_accept_price": "200", "contact": "+6011112222"},
+        )
+        auction_my = Auction.objects.create(
+            tenant=self.tenant_my,
+            listing=listing_my,
+            starting_price=Decimal("100.00"),
+            bid_increment=Decimal("10.00"),
+            current_price=Decimal("0.00"),
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        # 1. Click Make Offer
+        self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb1",
+                "from": {"id": self.buyer_user_id, "username": "manual_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"make_auction_offer_{listing_my.id}",
+            }
+        })
+
+        # 2. Enter offer price = 120
+        self.dispatcher_buyer_my.dispatch({
+            "message": {
+                "message_id": 102,
+                "chat": {"id": self.chat_id},
+                "from": {"id": self.buyer_user_id, "username": "manual_buyer"},
+                "text": "120",
+            }
+        })
+
+        # 3. Confirm offer (Yes) -> forwarded to seller
+        res = self.dispatcher_buyer_my.dispatch({
+            "callback_query": {
+                "id": "cb2",
+                "from": {"id": self.buyer_user_id, "username": "manual_buyer"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"auction_confirm_autoaccept_offer_yes_120_{listing_my.id}",
+            }
+        })
+        self.assertEqual(res["action"], "offer_sent_to_seller")
+
+        # 4. Seller accepts offer
+        self.mock_tg_svc.reset_mock()
+        seller_user = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=1091665905,
+            chat_id=1091665905,
+            username="SellerBoss",
+        )
+        res_seller = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_acc",
+                "from": {"id": seller_user.telegram_user_id, "username": "SellerBoss"},
+                "message": {"chat": {"id": self.chat_id}},
+                "data": f"accept_auction_offer_{listing_my.id}_{self.buyer_user_id}_120",
+            }
+        })
+        self.assertEqual(res_seller["action"], "accepted_auction_offer")
+
+        auction_my.refresh_from_db()
+        listing_my.refresh_from_db()
+        self.assertEqual(auction_my.status, AuctionStatus.SOLD)
+        self.assertEqual(auction_my.winning_price, Decimal("120.00"))
+        self.assertEqual(auction_my.winner_id, str(self.buyer_user_id))
+        self.assertEqual(listing_my.status, ListingStatus.CLOSED)
+
+
+
 
 
 

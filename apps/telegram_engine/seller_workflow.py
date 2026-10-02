@@ -15,6 +15,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.timezone import localtime
 
+from apps.bidding.models import Auction, AuctionStatus
 from apps.listings.models import Listing, ListingImage, ListingStatus, ListingType, Seller, SellerStatus
 from apps.telegram_engine.keyboards import BREED_OPTIONS, SellerKeyboards
 from apps.telegram_engine.messages import SellerMessages
@@ -621,6 +622,96 @@ class SellerWorkflow:
         # 9. Start new listing from button
         elif data == "start_new_listing":
             return self.start_new_listing(user, chat_id)
+
+        # 10. Accept auction offer
+        elif data.startswith("accept_auction_offer_"):
+            parts = data.split("_")
+            # accept_auction_offer_{listing_id}_{buyer_id}_{offer_price}
+            if len(parts) >= 6:
+                try:
+                    listing_id = int(parts[3])
+                    buyer_id = int(parts[4])
+                    offer_price = Decimal(parts[5])
+
+                    listing = Listing.objects.get(tenant=self.tenant, id=listing_id)
+                    auction = getattr(listing, "auction", None)
+                    if not auction or auction.status != AuctionStatus.ACTIVE:
+                        self.telegram_service.send_message(
+                            chat_id=chat_id,
+                            text=f"Listing #{listing_id} is already closed or not active.",
+                        )
+                        return {"handled": True, "action": "listing_already_closed"}
+
+                    auction.status = AuctionStatus.SOLD
+                    auction.current_price = offer_price
+                    auction.winning_price = offer_price
+                    auction.winner_id = str(buyer_id)
+                    auction.save(update_fields=["status", "current_price", "winning_price", "winner_id", "updated_at"])
+
+                    listing.status = ListingStatus.CLOSED
+                    listing.save(update_fields=["status", "updated_at"])
+
+                    offer_display = int(offer_price) if offer_price == int(offer_price) else offer_price
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text=f"Offer for Listing No. ({listing.id}) ({listing.title}) has been accepted at (${offer_display}).",
+                    )
+
+                    # Notify buyer via buyer bot
+                    buyer_cfg = TelegramBotConfig.objects.filter(tenant=self.tenant, bot_type="BUYER", is_active=True).first()
+                    if buyer_cfg:
+                        buyer_svc = TelegramService(buyer_cfg)
+                        seller_contact = (
+                            (listing.metadata.get("contact") if isinstance(listing.metadata, dict) else None)
+                            or listing.seller_username
+                            or "Authorized Seller"
+                        )
+                        buyer_msg = (
+                            f"Congratulations! You have successfully purchased listing: #{listing.id} ({listing.title}).\n"
+                            f"For the amount of ${offer_display} \n\n"
+                            f"Here is the seller's contact information:\n {seller_contact}"
+                        )
+                        try:
+                            buyer_svc.send_message(chat_id=buyer_id, text=buyer_msg)
+                        except Exception as exc:
+                            logger.warning("Could not send accept congrats to buyer %s: %s", buyer_id, exc)
+
+                    return {"handled": True, "action": "accepted_auction_offer"}
+                except Exception as exc:
+                    logger.error("Error accepting auction offer: %s", exc)
+                    return {"handled": True, "action": "error_accepting_offer"}
+
+        # 11. Reject auction offer
+        elif data.startswith("reject_auction_offer_"):
+            parts = data.split("_")
+            # reject_auction_offer_{listing_id}_{buyer_id}_{offer_price}
+            if len(parts) >= 6:
+                try:
+                    listing_id = int(parts[3])
+                    buyer_id = int(parts[4])
+                    offer_price = Decimal(parts[5])
+
+                    listing = Listing.objects.get(tenant=self.tenant, id=listing_id)
+                    offer_display = int(offer_price) if offer_price == int(offer_price) else offer_price
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text=f"Offer for Listing No. ({listing.id}) ({listing.title}) has been rejected at (${offer_display}).",
+                    )
+
+                    # Notify buyer via buyer bot
+                    buyer_cfg = TelegramBotConfig.objects.filter(tenant=self.tenant, bot_type="BUYER", is_active=True).first()
+                    if buyer_cfg:
+                        buyer_svc = TelegramService(buyer_cfg)
+                        buyer_msg = f"Sorry! The Seller has rejected your offer for  Listing No. ({listing.id})  ({listing.title})  at (${offer_display})."
+                        try:
+                            buyer_svc.send_message(chat_id=buyer_id, text=buyer_msg)
+                        except Exception as exc:
+                            logger.warning("Could not send reject message to buyer %s: %s", buyer_id, exc)
+
+                    return {"handled": True, "action": "rejected_auction_offer"}
+                except Exception as exc:
+                    logger.error("Error rejecting auction offer: %s", exc)
+                    return {"handled": True, "action": "error_rejecting_offer"}
 
         return {"handled": False, "action": "unrecognized_seller_callback"}
 

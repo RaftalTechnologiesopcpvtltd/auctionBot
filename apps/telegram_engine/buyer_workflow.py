@@ -31,6 +31,7 @@ class BuyerWorkflowState:
     IDLE = "IDLE"
     WAITING_PASSWORD = "WAITING_PASSWORD"
     WAITING_CONTACT_TEXT = "WAITING_CONTACT_TEXT"
+    WAITING_OFFER_PRICE = "WAITING_OFFER_PRICE"
 
 
 class BuyerWorkflow:
@@ -161,7 +162,47 @@ class BuyerWorkflow:
             )
             return {"handled": True, "action": "contact_saved"}
 
-        # 3. Custom Keyboard Button Handlers
+        # 3. State: WAITING_OFFER_PRICE
+        if conv.state == BuyerWorkflowState.WAITING_OFFER_PRICE:
+            try:
+                offer_price = Decimal(text_clean)
+            except Exception:
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=BuyerMessages.INVALID_NUMBER_PROMPT,
+                )
+                return {"handled": True, "action": "invalid_offer_number"}
+
+            if offer_price <= Decimal("0.00"):
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=BuyerMessages.INVALID_OFFER_AMOUNT,
+                )
+                return {"handled": True, "action": "invalid_offer_amount"}
+
+            listing_id = (conv.context_data or {}).get("offer_listing_id")
+            if not listing_id:
+                conv.state = BuyerWorkflowState.IDLE
+                conv.save(update_fields=["state", "updated_at"])
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=BuyerMessages.NO_LISTINGS_FOUND,
+                    reply_markup=BuyerKeyboards.main_menu(),
+                )
+                return {"handled": True, "action": "offer_listing_missing"}
+
+            conv.state = BuyerWorkflowState.IDLE
+            conv.save(update_fields=["state", "updated_at"])
+
+            offer_display = int(offer_price) if offer_price == int(offer_price) else offer_price
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=BuyerMessages.CONFIRM_OFFER_PROMPT,
+                reply_markup=BuyerKeyboards.confirm_offer(offer_price=offer_display, listing_id=listing_id),
+            )
+            return {"handled": True, "action": "prompt_confirm_offer"}
+
+        # 4. Custom Keyboard Button Handlers
         if text_clean == "Start":
             self.telegram_service.send_message(
                 chat_id=chat_id,
@@ -309,6 +350,15 @@ class BuyerWorkflow:
                 text=BuyerMessages.PROCESS_CANCELLED_INLINE,
             )
             return {"handled": True, "action": "cancel_process"}
+
+        # 10. Make Offer on auction listing
+        elif data.startswith("make_auction_offer_"):
+            listing_id_str = data.split("_")[-1]
+            return self._handle_make_auction_offer(user, chat_id, callback_id, listing_id_str)
+
+        # 11. Confirm Auto-accept Offer (Yes / No)
+        elif data.startswith("auction_confirm_autoaccept_offer_"):
+            return self._handle_confirm_auction_offer(user, chat_id, callback_id, data)
 
         return {"handled": False, "action": "unrecognized_callback"}
 
@@ -794,3 +844,156 @@ class BuyerWorkflow:
             self._render_auction_card(chat_id, auction.listing, auction=auction)
 
         return {"handled": True, "count": len(ending_soon_auctions)}
+
+    def _handle_make_auction_offer(
+        self,
+        user: TelegramUser,
+        chat_id: int,
+        callback_id: str,
+        listing_id_str: str,
+    ) -> Dict[str, Any]:
+        """Prompts buyer for offer price or prevents offer if bid already exists."""
+        try:
+            listing_id = int(listing_id_str)
+            listing = Listing.objects.get(
+                tenant=self.tenant,
+                id=listing_id,
+                status=ListingStatus.APPROVED,
+            )
+            auction = getattr(listing, "auction", None)
+            if not auction or auction.status != AuctionStatus.ACTIVE:
+                self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.NO_LISTINGS_FOUND)
+                return {"handled": True, "action": "auction_not_active"}
+
+            if auction.bids.exists() or auction.highest_bid_id is not None:
+                self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.OFFER_BID_ALREADY_EXISTS)
+                return {"handled": True, "action": "bid_already_placed"}
+
+            conv = self._get_conversation_state(user)
+            conv.state = BuyerWorkflowState.WAITING_OFFER_PRICE
+            conv.context_data = {"offer_listing_id": listing.id}
+            conv.save(update_fields=["state", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.OFFER_PRICE_PROMPT)
+            return {"handled": True, "action": "waiting_offer_price"}
+        except (ValueError, Listing.DoesNotExist):
+            self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.NO_LISTINGS_FOUND)
+            return {"handled": True, "action": "listing_not_found"}
+
+    def _handle_confirm_auction_offer(
+        self,
+        user: TelegramUser,
+        chat_id: int,
+        callback_id: str,
+        data: str,
+    ) -> Dict[str, Any]:
+        """Processes offer confirmation: auto-accept if threshold met, else forward to seller bot."""
+        parts = data.split("_")
+        # auction_confirm_autoaccept_offer_{action}_{offer_price}_{listing_id}
+        if len(parts) < 7:
+            return {"handled": False, "action": "invalid_confirm_offer_data"}
+
+        action = parts[4].lower()  # 'yes' or 'no'
+        try:
+            offer_price = Decimal(parts[5])
+            listing_id = int(parts[6])
+        except Exception:
+            return {"handled": False, "action": "invalid_confirm_offer_params"}
+
+        if action == "no":
+            self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.PURCHASE_CANCELLED)
+            return {"handled": True, "action": "offer_cancelled"}
+
+        try:
+            listing = Listing.objects.get(
+                tenant=self.tenant,
+                id=listing_id,
+                status=ListingStatus.APPROVED,
+            )
+            auction = getattr(listing, "auction", None)
+            if not auction or auction.status != AuctionStatus.ACTIVE:
+                self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.NO_LISTINGS_FOUND)
+                return {"handled": True, "action": "auction_not_active"}
+
+            auto_accept_raw = listing.metadata.get("auto_accept_price") if isinstance(listing.metadata, dict) else None
+            auto_accept_price = None
+            if auto_accept_raw:
+                try:
+                    auto_accept_price = Decimal(str(auto_accept_raw))
+                except Exception:
+                    auto_accept_price = None
+
+            # 1. AUTO-ACCEPT FLOW
+            if auto_accept_price is not None and auto_accept_price > Decimal("0.00") and offer_price >= auto_accept_price:
+                auction.status = AuctionStatus.SOLD
+                auction.current_price = offer_price
+                auction.winning_price = offer_price
+                auction.winner_id = str(user.telegram_user_id)
+                auction.save(update_fields=["status", "current_price", "winning_price", "winner_id", "updated_at"])
+
+                listing.status = ListingStatus.CLOSED
+                listing.save(update_fields=["status", "updated_at"])
+
+                self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.OFFER_SENT_SUCCESS)
+
+                seller_contact = (
+                    (listing.metadata.get("contact") if isinstance(listing.metadata, dict) else None)
+                    or listing.seller_username
+                    or "Authorized Seller"
+                )
+                offer_display = int(offer_price) if offer_price == int(offer_price) else offer_price
+                congrats_text = (
+                    f"Congratulations! You have successfully purchased listing: #{listing.id} ({listing.title}).\n"
+                    f"For the amount of ${offer_display} \n\n"
+                    f"Here is the seller's contact information:\n {seller_contact}"
+                )
+                self.telegram_service.send_message(chat_id=chat_id, text=congrats_text)
+
+                # Send seller notification
+                seller_cfg = TelegramBotConfig.objects.filter(tenant=self.tenant, bot_type="SELLER", is_active=True).first()
+                if seller_cfg and listing.seller_id:
+                    seller_svc = TelegramService(seller_cfg)
+                    try:
+                        seller_svc.send_message(
+                            chat_id=int(listing.seller_id),
+                            text=f"Your listing #{listing.id} titled {listing.title} is now closed.\nAuto-accepted offer of ${offer_display} from @{user.username or user.telegram_user_id}.",
+                        )
+                    except Exception as exc:
+                        logger.warning("Could not notify seller %s of auto-accepted offer: %s", listing.seller_id, exc)
+
+                return {"handled": True, "action": "offer_auto_accepted", "price": offer_price}
+
+            # 2. MANUAL SELLER APPROVAL FLOW
+            else:
+                self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.OFFER_SENT_SUCCESS)
+
+                seller_cfg = TelegramBotConfig.objects.filter(tenant=self.tenant, bot_type="SELLER", is_active=True).first()
+                if seller_cfg and listing.seller_id:
+                    seller_svc = TelegramService(seller_cfg)
+                    from apps.telegram_engine.keyboards import SellerKeyboards
+                    orig_price = (
+                        (listing.metadata.get("starting_price") if isinstance(listing.metadata, dict) else None)
+                        or auction.starting_price
+                    )
+                    offer_display = int(offer_price) if offer_price == int(offer_price) else offer_price
+                    orig_display = int(Decimal(str(orig_price))) if Decimal(str(orig_price)) == int(Decimal(str(orig_price))) else orig_price
+                    seller_msg = (
+                        f"New offer for listing titled {listing.title} with ID: #{listing.id} by @{user.username or user.first_name or user.telegram_user_id}.\n\n"
+                        f"Original Price: ${orig_display}\n"
+                        f"Offer Price:  ${offer_display}"
+                    )
+                    try:
+                        seller_svc.send_message(
+                            chat_id=int(listing.seller_id),
+                            text=seller_msg,
+                            reply_markup=SellerKeyboards.offer_response(listing.id, user.telegram_user_id, offer_display),
+                        )
+                    except Exception as exc:
+                        logger.warning("Could not send offer message to seller %s: %s", listing.seller_id, exc)
+
+                return {"handled": True, "action": "offer_sent_to_seller", "price": offer_price}
+
+        except (ValueError, Listing.DoesNotExist):
+            self.telegram_service.send_message(chat_id=chat_id, text=BuyerMessages.NO_LISTINGS_FOUND)
+            return {"handled": True, "action": "listing_not_found"}
+

@@ -149,7 +149,7 @@ class SellerWorkflow:
 
         elif text_clean == "Live Listings":
             base_url = getattr(settings, "BASE_SITE_URL", "https://auctionbot.shop")
-            msg = f"View your live listings at:\n{base_url}/live-listing/"
+            msg = f"View your live listings at:\n{base_url}/live-listing/?seller_id={user.telegram_user_id}"
             self.telegram_service.send_message(chat_id=chat_id, text=msg)
             return {"handled": True, "action": "live_listings"}
 

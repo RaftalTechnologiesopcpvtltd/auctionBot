@@ -154,25 +154,13 @@ class SellerWorkflow:
             return {"handled": True, "action": "live_listings"}
 
         elif text_clean == "My Closed Listings":
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text=SellerMessages.NO_LISTINGS_AVAILABLE,
-            )
-            return {"handled": True, "action": "my_closed_listings"}
+            return self._handle_my_closed_listings(user, chat_id)
 
         elif text_clean == "Auction Ending Soon":
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text=SellerMessages.NO_LISTINGS_AVAILABLE,
-            )
-            return {"handled": True, "action": "auction_ending_soon"}
+            return self._handle_auction_ending_soon(user, chat_id)
 
         elif text_clean == "Sold Items":
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text=SellerMessages.NO_SOLD_LISTINGS,
-            )
-            return {"handled": True, "action": "sold_items"}
+            return self._handle_sold_items(user, chat_id)
 
         elif text_clean == "My Wallet":
             from apps.finance.models import FinancialAccount, AccountType
@@ -915,3 +903,124 @@ class SellerWorkflow:
             )
 
         return {"handled": True, "count": listings.count()}
+
+    def _handle_my_closed_listings(self, user: TelegramUser, chat_id: int) -> Dict[str, Any]:
+        """Fetches and displays closed listings for this seller."""
+        closed_listings = Listing.objects.filter(
+            tenant=self.tenant,
+            seller_id=str(user.telegram_user_id),
+            status=ListingStatus.CLOSED,
+        ).prefetch_related("images").order_by("-updated_at")
+
+        if not closed_listings.exists():
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.NO_LISTINGS_AVAILABLE,
+            )
+            return {"handled": True, "action": "my_closed_listings", "count": 0}
+
+        for item in closed_listings:
+            msg = (
+                f"Listing ID: [#{item.id}]\n"
+                f"Title: {item.title}\n"
+                f"Category Type: {item.category}\n"
+                f"Sales Type: {item.listing_type}\n"
+                f"Status: Closed\n"
+                f"{'-' * 20}\n"
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=msg,
+                reply_markup=SellerKeyboards.my_listing_actions(item.id),
+            )
+
+        return {"handled": True, "action": "my_closed_listings", "count": closed_listings.count()}
+
+    def _handle_auction_ending_soon(self, user: TelegramUser, chat_id: int) -> Dict[str, Any]:
+        """Fetches active auctions ending within 24 hours."""
+        from apps.bidding.models import Auction, AuctionStatus
+        now = timezone.now()
+        ending_soon = Auction.objects.filter(
+            tenant=self.tenant,
+            listing__seller_id=str(user.telegram_user_id),
+            status=AuctionStatus.ACTIVE,
+            end_at__lte=now + timezone.timedelta(days=1),
+            end_at__gte=now,
+        ).select_related("listing").order_by("end_at")
+
+        if not ending_soon.exists():
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.NO_LISTINGS_AVAILABLE,
+            )
+            return {"handled": True, "action": "auction_ending_soon", "count": 0}
+
+        for auction in ending_soon:
+            msg = (
+                f"Listing ID: #{auction.listing.id}\n"
+                f"Title: {auction.listing.title}\n"
+                f"Current Price: ${auction.current_price}\n"
+                f"End Time: {auction.end_at.strftime('%d-%m-%Y %H:%M')}\n"
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=msg,
+                reply_markup=SellerKeyboards.my_listing_actions(auction.listing.id),
+            )
+
+        return {"handled": True, "action": "auction_ending_soon", "count": ending_soon.count()}
+
+    def _handle_sold_items(self, user: TelegramUser, chat_id: int) -> Dict[str, Any]:
+        """Fetches and displays sold items for this seller replicating legacy UX."""
+        from apps.bidding.models import Auction, AuctionStatus
+        sold_auctions = Auction.objects.filter(
+            tenant=self.tenant,
+            listing__seller_id=str(user.telegram_user_id),
+            status=AuctionStatus.SOLD,
+        ).select_related("listing", "winning_bid").prefetch_related("listing__images").order_by("-end_at")
+
+        if not sold_auctions.exists():
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.NO_SOLD_LISTINGS,
+            )
+            return {"handled": True, "action": "sold_items", "count": 0}
+
+        self.telegram_service.send_message(
+            chat_id=chat_id,
+            text=SellerMessages.SOLD_LISTINGS_HEADER,
+        )
+
+        for auction in sold_auctions:
+            winner_info = "N/A"
+            if auction.winning_bid:
+                winner_info = f"@{auction.winning_bid.bidder_username}" if auction.winning_bid.bidder_username else f"User {auction.winning_bid.bidder_id}"
+            msg = (
+                f"Listing ID: #{auction.listing.id}\n"
+                f"Title: {auction.listing.title}\n"
+                f"Buyer: {winner_info}\n"
+                f"Price: ${auction.current_price}\n"
+                f"Quantity: {auction.listing.quantity}\n"
+                f"Status: Sold\n"
+                f"End Time: {auction.end_at.strftime('%d-%m-%Y %H:%M') if auction.end_at else 'N/A'}\n"
+            )
+            photo_file_id = None
+            if auction.listing.images.exists():
+                photo_file_id = auction.listing.images.first().telegram_file_id
+
+            if photo_file_id and hasattr(self.telegram_service, "send_photo"):
+                self.telegram_service.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_file_id,
+                    caption=msg,
+                    reply_markup=SellerKeyboards.my_listing_actions(auction.listing.id),
+                )
+            else:
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    reply_markup=SellerKeyboards.my_listing_actions(auction.listing.id),
+                )
+
+        return {"handled": True, "action": "sold_items", "count": sold_auctions.count()}
+

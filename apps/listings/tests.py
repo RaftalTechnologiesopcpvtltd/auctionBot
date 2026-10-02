@@ -208,3 +208,38 @@ class SellerAndMediaDomainTest(TestCase):
         self.assertEqual(images[0].telegram_file_id, "tg_123")
         self.assertEqual(images[1].telegram_file_id, "tg_456")
 
+    def test_live_listing_view(self):
+        """Test public /live-listing/ endpoint returns 200 OK with active auctions."""
+        from django.test import Client
+        from apps.bidding.models import Auction, AuctionStatus
+        from django.utils import timezone
+
+        listing = listing_service.create_listing(
+            tenant=self.tenant_a,
+            seller_id="1001",
+            seller_username="seller1",
+            title="Live Betta Halfmoon",
+            status=ListingStatus.APPROVED,
+        )
+        auction = Auction.objects.create(
+            tenant=self.tenant_a,
+            listing=listing,
+            starting_price=20,
+            current_price=25,
+            start_at=timezone.now() - timezone.timedelta(hours=1),
+            end_at=timezone.now() + timezone.timedelta(days=2),
+            status=AuctionStatus.ACTIVE,
+        )
+
+        client = Client()
+        resp = client.get("/live-listing/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Live Betta Halfmoon")
+        self.assertContains(resp, "Live Marketplace")
+
+        # Test with seller_id filter
+        resp_seller = client.get("/live-listing/1001/")
+        self.assertEqual(resp_seller.status_code, 200)
+        self.assertContains(resp_seller, "Live Betta Halfmoon")
+
+

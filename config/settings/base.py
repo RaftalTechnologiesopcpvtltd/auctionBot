@@ -18,7 +18,7 @@ if str(APPS_DIR) not in sys.path:
 # Load .env file if it exists
 env_path = BASE_DIR / ".env"
 if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
+    load_dotenv(dotenv_path=env_path, override=False)
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/

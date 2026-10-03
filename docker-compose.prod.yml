@@ -43,6 +43,9 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-auctionbot_prod_db}
+      - POSTGRES_USER=${POSTGRES_USER:-auctionbot_prod_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-Rusingle@7866}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -70,6 +73,9 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-auctionbot_prod_db}
+      - POSTGRES_USER=${POSTGRES_USER:-auctionbot_prod_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-Rusingle@7866}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0

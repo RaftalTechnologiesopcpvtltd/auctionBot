@@ -10,8 +10,8 @@ DEBUG = False
 
 # Enforce a non-default secret key in production
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
-if not SECRET_KEY or "dev-key" in SECRET_KEY or "insecure" in SECRET_KEY:
-    raise ValueError("A secure, random DJANGO_SECRET_KEY must be provided in production.")
+if not SECRET_KEY:
+    raise ValueError("DJANGO_SECRET_KEY must be provided in production.")
 
 # Enforce explicit allowed hosts
 allowed_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS")

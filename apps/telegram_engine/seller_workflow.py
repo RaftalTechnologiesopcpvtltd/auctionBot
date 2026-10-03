@@ -9,6 +9,7 @@ Underneath the identical legacy Telegram UX:
 import logging
 import os
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from django.conf import settings
@@ -17,7 +18,8 @@ from django.utils.timezone import localtime
 
 from apps.bidding.models import Auction, AuctionStatus
 from apps.listings.models import Listing, ListingImage, ListingStatus, ListingType, Seller, SellerStatus
-from apps.telegram_engine.keyboards import BREED_OPTIONS, SellerKeyboards
+from apps.telegram_engine.calendar_picker import TelegramCalendar
+from apps.telegram_engine.keyboards import BREED_OPTIONS, BUYNOW_DAYS_OPTIONS, SellerKeyboards
 from apps.telegram_engine.messages import SellerMessages
 from apps.telegram_engine.models import TelegramBotConfig, TelegramConversationState, TelegramUser
 from apps.tenants.models import Tenant
@@ -43,6 +45,10 @@ class SellerWorkflowStep:
     AUCTION_START_TIME = "AUCTION_START_TIME"
     AUCTION_END_TIME = "AUCTION_END_TIME"
     BUYNOW_PRICE = "BUYNOW_PRICE"
+    BUYNOW_AUTO_ACCEPT = "BUYNOW_AUTO_ACCEPT"
+    BUYNOW_START_DATE = "BUYNOW_START_DATE"
+    BUYNOW_START_TIME = "BUYNOW_START_TIME"
+    BUYNOW_DAYS = "BUYNOW_DAYS"
     PICTURE = "PICTURE"
     VIDEO = "VIDEO"
     WALLET_AMOUNT = "WALLET_AMOUNT"
@@ -313,9 +319,11 @@ class SellerWorkflow:
             conv.context_data = ctx
             conv.save(update_fields=["step", "context_data", "updated_at"])
 
+            cal_kb, _ = TelegramCalendar(calendar_id=0, min_date=timezone.localdate()).build()
             self.telegram_service.send_message(
                 chat_id=chat_id,
                 text=SellerMessages.START_DATE_PROMPT,
+                reply_markup=cal_kb,
             )
             return {"handled": True, "action": "received_min_bid"}
 
@@ -369,15 +377,87 @@ class SellerWorkflow:
                 return {"handled": True, "action": "invalid_price"}
 
             ctx["buynow_price"] = int(text_clean)
+            conv.step = SellerWorkflowStep.BUYNOW_AUTO_ACCEPT
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.AUTO_ACCEPT_OFFER_PRICE_PROMPT,
+            )
+            return {"handled": True, "action": "received_buynow_price"}
+
+        elif step == SellerWorkflowStep.BUYNOW_AUTO_ACCEPT:
+            if not text_clean.isdigit():
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=SellerMessages.INVALID_PRICE,
+                )
+                return {"handled": True, "action": "invalid_price"}
+
+            ctx["buynow_auto_accept_price"] = int(text_clean)
+            conv.step = SellerWorkflowStep.BUYNOW_START_DATE
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            cal_kb, _ = TelegramCalendar(calendar_id=1, min_date=timezone.localdate()).build()
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.START_DATE_PROMPT,
+                reply_markup=cal_kb,
+            )
+            return {"handled": True, "action": "received_buynow_auto_accept"}
+
+        elif step == SellerWorkflowStep.BUYNOW_START_DATE:
+            ctx["buynow_start_date"] = text_clean
+            conv.step = SellerWorkflowStep.BUYNOW_START_TIME
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=f"Date selected: {text_clean}\n\n/cancel",
+            )
+            time_kb = SellerKeyboards.create_time_keyboard()
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text="Start Time:\n\n/cancel",
+                reply_markup=time_kb,
+            )
+            return {"handled": True, "action": "received_buynow_start_date"}
+
+        elif step == SellerWorkflowStep.BUYNOW_START_TIME:
+            ctx["buynow_start_time"] = text_clean
+            conv.step = SellerWorkflowStep.BUYNOW_DAYS
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=f"Selected time: {text_clean}\n\n/cancel",
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.BUYNOW_DURATION_PROMPT,
+                reply_markup=SellerKeyboards.buynow_days_options(),
+            )
+            return {"handled": True, "action": "received_buynow_start_time"}
+
+        elif step == SellerWorkflowStep.BUYNOW_DAYS:
+            ctx["buynow_days"] = text_clean
             conv.step = SellerWorkflowStep.PICTURE
             conv.context_data = ctx
             conv.save(update_fields=["step", "context_data", "updated_at"])
 
             self.telegram_service.send_message(
                 chat_id=chat_id,
+                text=f"Selected Duration: {text_clean}\n\n/cancel",
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
                 text=SellerMessages.UPLOAD_IMAGES_PROMPT,
             )
-            return {"handled": True, "action": "received_buynow_price"}
+            return {"handled": True, "action": "received_buynow_days"}
 
         elif step == SellerWorkflowStep.PICTURE:
             self.telegram_service.send_message(
@@ -491,7 +571,126 @@ class SellerWorkflow:
                 )
             return {"handled": True, "action": "selected_sales_type"}
 
-        # 3. Auction End Time Presets
+        # 3. Calendar Callback Processing (AUCTION_START_DATE & BUYNOW_START_DATE)
+        elif data.startswith("cbcal_"):
+            is_buynow = conv.step == SellerWorkflowStep.BUYNOW_START_DATE or ctx.get("category") == "Buy It Now"
+            cal_id = 1 if is_buynow else 0
+            cal = TelegramCalendar(calendar_id=cal_id, min_date=timezone.localdate())
+            selected_date, new_kb, step_name = cal.process(data)
+
+            if not selected_date and new_kb:
+                # User clicked navigation (month/year/prev/next)
+                if callback_id:
+                    self.telegram_service.answer_callback_query(callback_id)
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text="Select date:",
+                    reply_markup=new_kb,
+                )
+                return {"handled": True, "action": "calendar_navigated"}
+
+            elif selected_date:
+                date_str = selected_date.strftime("%d-%m-%Y")
+                if is_buynow:
+                    ctx["buynow_start_date"] = date_str
+                    conv.step = SellerWorkflowStep.BUYNOW_START_TIME
+                    conv.context_data = ctx
+                    conv.save(update_fields=["step", "context_data", "updated_at"])
+
+                    if callback_id:
+                        self.telegram_service.answer_callback_query(callback_id, f"Date: {date_str}")
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text="Start Date:",
+                    )
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text=f"Date selected: {date_str}\n\n/cancel",
+                    )
+                    # Filter time keyboard if today
+                    is_today = selected_date == timezone.localdate()
+                    curr_hour = timezone.localtime().hour if is_today else 0
+                    time_kb = SellerKeyboards.create_past_time_keyboard(curr_hour) if is_today else SellerKeyboards.create_time_keyboard()
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text="Start Time:\n\n/cancel",
+                        reply_markup=time_kb,
+                    )
+                    return {"handled": True, "action": "buynow_date_selected", "date": date_str}
+                else:
+                    ctx["start_date"] = date_str
+                    conv.step = SellerWorkflowStep.AUCTION_START_TIME
+                    conv.context_data = ctx
+                    conv.save(update_fields=["step", "context_data", "updated_at"])
+
+                    if callback_id:
+                        self.telegram_service.answer_callback_query(callback_id, f"Date: {date_str}")
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text="Start Date:",
+                    )
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text=f"Date selected: {date_str}\n\n/cancel",
+                    )
+                    self.telegram_service.send_message(
+                        chat_id=chat_id,
+                        text=SellerMessages.START_TIME_PROMPT,
+                    )
+                    return {"handled": True, "action": "auction_date_selected", "date": date_str}
+            return {"handled": True, "action": "calendar_ignored"}
+
+        # 4. Hourly Time Pickers (hour_01 AM .. hour_12 PM)
+        elif data.startswith("hour_"):
+            time_part = data.split("_", 1)[1]  # e.g. "03 PM" or "11 AM"
+            ctx["selected_hour"] = time_part
+            try:
+                time_24 = datetime.strptime(time_part, "%I %p").strftime("%H:00")
+            except Exception:
+                time_24 = time_part
+            ctx["buynow_start_time"] = time_24
+            conv.step = SellerWorkflowStep.BUYNOW_DAYS
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            if callback_id:
+                self.telegram_service.answer_callback_query(callback_id, f"Time: {time_part}")
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text="Start Time:",
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=f"Selected time: {time_part}\n\n/cancel",
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.BUYNOW_DURATION_PROMPT,
+                reply_markup=SellerKeyboards.buynow_days_options(),
+            )
+            return {"handled": True, "action": "selected_buynow_time", "time": time_24}
+
+        # 5. Buy Now Duration Presets (10_days_buynow, 20_days_buynow, 30_days_buynow)
+        elif data.endswith("_days_buynow"):
+            days = data.split("_")[0]
+            ctx["buynow_days"] = days
+            conv.step = SellerWorkflowStep.PICTURE
+            conv.context_data = ctx
+            conv.save(update_fields=["step", "context_data", "updated_at"])
+
+            if callback_id:
+                self.telegram_service.answer_callback_query(callback_id, f"{days} days")
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=f"Selected Duration: {days} days\n\n/cancel",
+            )
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.UPLOAD_IMAGES_PROMPT,
+            )
+            return {"handled": True, "action": "selected_buynow_days", "days": days}
+
+        # 6. Auction End Time Presets
         elif data in ["1_day_auction", "2_days_auction", "3_days_auction", "5_days_auction", "10_days_auction"]:
             days = data.split("_")[0]
             ctx["auction_days"] = days
@@ -516,7 +715,7 @@ class SellerWorkflow:
             )
             return {"handled": True, "action": "manual_end_time"}
 
-        # 4. Skip Picture Callback
+        # 7. Skip Picture Callback
         elif data == "skip_picture":
             conv.step = SellerWorkflowStep.VIDEO
             conv.save(update_fields=["step", "updated_at"])
@@ -883,9 +1082,11 @@ class SellerWorkflow:
                 "auto_accept_price": str(ctx.get("auto_accept_price") or ""),
                 "min_bid": str(ctx.get("min_bid") or 5),
                 "buynow_price": str(ctx.get("buynow_price") or 0) if sales_type != "Auction" else "",
-                "start_date": str(ctx.get("start_date") or ""),
-                "start_time": str(ctx.get("start_time") or ""),
+                "buynow_auto_accept_price": str(ctx.get("buynow_auto_accept_price") or ""),
+                "start_date": str(ctx.get("start_date") or ctx.get("buynow_start_date") or ""),
+                "start_time": str(ctx.get("start_time") or ctx.get("buynow_start_time") or ""),
                 "auction_days": str(ctx.get("auction_days") or ""),
+                "buynow_days": str(ctx.get("buynow_days") or ""),
             },
         )
 

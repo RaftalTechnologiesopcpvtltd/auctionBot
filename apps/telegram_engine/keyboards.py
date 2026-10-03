@@ -21,6 +21,8 @@ BREED_OPTIONS = [
 ]
 
 CATEGORY_OPTIONS = ["Auction", "Buy It Now"]
+BUYNOW_DAYS_OPTIONS = ["10", "20", "30"]
+AUCTION_DAYS_OPTIONS = ["1", "2", "3", "5", "10"]
 WALLET_AMOUNT_OPTIONS = ["10", "20", "50", "100"]
 
 
@@ -260,6 +262,59 @@ class SellerKeyboards:
                 ]
             ]
         }
+
+    @staticmethod
+    def buynow_days_options() -> Dict[str, Any]:
+        """Buy It Now duration options."""
+        return {
+            "inline_keyboard": [
+                [{"text": f"{opt} days", "callback_data": f"{opt}_days_buynow"}]
+                for opt in BUYNOW_DAYS_OPTIONS
+            ]
+        }
+
+    @staticmethod
+    def create_time_keyboard() -> Dict[str, Any]:
+        """Full 24-slot hourly time picker (1 AM to 12 PM)."""
+        hours_am = [f"{h:02} AM" for h in range(1, 13)]
+        hours_pm = [f"{h:02} PM" for h in range(1, 13)]
+
+        keyboard_am = [
+            [{"text": hour, "callback_data": f"hour_{hour}"} for hour in hours_am[i:i + 3]]
+            for i in range(0, len(hours_am), 3)
+        ]
+        keyboard_pm = [
+            [{"text": hour, "callback_data": f"hour_{hour}"} for hour in hours_pm[i:i + 3]]
+            for i in range(0, len(hours_pm), 3)
+        ]
+        return {"inline_keyboard": keyboard_am + keyboard_pm}
+
+    @staticmethod
+    def create_past_time_keyboard(current_hour_24: int = 0) -> Dict[str, Any]:
+        """Filtered hourly time picker excluding past hours for current date."""
+        hours_am = [f"{h:02} AM" for h in range(1, 13)]
+        hours_pm = [f"{h:02} PM" for h in range(1, 13)]
+
+        am_24 = {f"{h:02} AM": h for h in range(1, 12)}
+        am_24["12 AM"] = 0
+        pm_24 = {f"{h:02} PM": h + 12 for h in range(1, 12)}
+        pm_24["12 PM"] = 12
+
+        hours_am = [hour for hour in hours_am if am_24[hour] >= current_hour_24]
+        hours_pm = [hour for hour in hours_pm if pm_24[hour] >= current_hour_24]
+
+        keyboard_am = [
+            [{"text": hour, "callback_data": f"hour_{hour}"} for hour in hours_am[i:i + 3]]
+            for i in range(0, len(hours_am), 3)
+        ]
+        keyboard_pm = [
+            [{"text": hour, "callback_data": f"hour_{hour}"} for hour in hours_pm[i:i + 3]]
+            for i in range(0, len(hours_pm), 3)
+        ]
+        combined = keyboard_am + keyboard_pm
+        if not combined:
+            return SellerKeyboards.create_time_keyboard()
+        return {"inline_keyboard": combined}
 
     @staticmethod
     def offer_response(listing_id: int, buyer_id: int, offer_price: Any) -> Dict[str, Any]:

@@ -1437,6 +1437,113 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         self.assertEqual(auction_my.winner_id, str(self.buyer_user_id))
         self.assertEqual(listing_my.status, ListingStatus.CLOSED)
 
+    def test_seller_listing_wizard_with_interactive_calendar_and_time_picker(self):
+        """Tests that seller listing wizard displays calendar picker and time buttons."""
+        seller_uid = 55667788
+        seller_user = TelegramUser.objects.create(
+            tenant=self.tenant_my,
+            telegram_user_id=seller_uid,
+            chat_id=seller_uid,
+            username="AquaSeller",
+        )
+
+        # 1. Start new listing
+        self.dispatcher_seller_my.dispatch({
+            "message": {
+                "message_id": 1,
+                "chat": {"id": seller_uid},
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "text": "Start New Listing",
+            }
+        })
+
+        # 2. Select category / breed
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_b1",
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "Pets & Accessories",
+            }
+        })
+
+        # 3. Enter Title, Description, Quantity, Contact
+        for step_text in ["Rare Blue Guppy", "Healthy active fish", "5", "+60123456789"]:
+            self.dispatcher_seller_my.dispatch({
+                "message": {
+                    "message_id": 2,
+                    "chat": {"id": seller_uid},
+                    "from": {"id": seller_uid, "username": "AquaSeller"},
+                    "text": step_text,
+                }
+            })
+
+        # 4. Choose Buy It Now
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_cat",
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "Buy It Now",
+            }
+        })
+
+        # 5. Enter Buy Now Price and Auto Accept
+        self.dispatcher_seller_my.dispatch({
+            "message": {
+                "message_id": 3,
+                "chat": {"id": seller_uid},
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "text": "50",
+            }
+        })
+        res_accept = self.dispatcher_seller_my.dispatch({
+            "message": {
+                "message_id": 4,
+                "chat": {"id": seller_uid},
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "text": "45",
+            }
+        })
+        self.assertEqual(res_accept["action"], "received_buynow_auto_accept")
+
+        # 6. Click a day on the calendar (cbcal_1_set-day_2026_10_15)
+        res_cal = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_date",
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "cbcal_1_set-day_2026_10_15",
+            }
+        })
+        self.assertEqual(res_cal["action"], "buynow_date_selected")
+        self.assertEqual(res_cal["date"], "15-10-2026")
+
+        # 7. Select hour button (hour_02 PM)
+        res_time = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_time",
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "hour_02 PM",
+            }
+        })
+        self.assertEqual(res_time["action"], "selected_buynow_time")
+        self.assertEqual(res_time["time"], "14:00")
+
+        # 8. Select Buy Now duration (20_days_buynow)
+        res_days = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_days",
+                "from": {"id": seller_uid, "username": "AquaSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "20_days_buynow",
+            }
+        })
+        self.assertEqual(res_days["action"], "selected_buynow_days")
+        self.assertEqual(res_days["days"], "20")
+
+
 
 
 

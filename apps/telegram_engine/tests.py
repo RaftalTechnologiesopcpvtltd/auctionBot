@@ -1216,7 +1216,28 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         res = self.dispatcher_seller_my.dispatch(submit_cb)
         self.assertEqual(res["action"], "submitted_payment")
 
-        # Verify wallet balance in FinancialAccount
+        # Verify DepositProofRequest is created in PENDING status
+        from apps.finance.models import DepositProofRequest, DepositStatus
+        dep_req = DepositProofRequest.objects.filter(
+            tenant=self.tenant_my,
+            telegram_user_id=str(self.buyer_user_id),
+            status=DepositStatus.PENDING,
+        ).first()
+        self.assertIsNotNone(dep_req)
+        self.assertEqual(dep_req.amount, Decimal("50.00"))
+
+        # Approve deposit request via finance service / dashboard
+        from apps.finance import services as fin_svc
+        fin_svc.deposit(
+            tenant=self.tenant_my,
+            user_id=str(self.buyer_user_id),
+            amount=dep_req.amount,
+            currency=dep_req.currency,
+        )
+        dep_req.status = DepositStatus.APPROVED
+        dep_req.save()
+
+        # Verify wallet balance in FinancialAccount after approval
         account = FinancialAccount.objects.filter(
             tenant=self.tenant_my,
             owner_id=str(self.buyer_user_id),
@@ -1542,6 +1563,168 @@ class LegacyUXBuyerAndSellerWorkflowTest(TestCase):
         })
         self.assertEqual(res_days["action"], "selected_buynow_days")
         self.assertEqual(res_days["days"], "20")
+
+    def test_seller_auction_wizard_time_picker_and_duration_presets(self):
+        """Verifies interactive date picker, time keyboard, and duration presets for Auction listings."""
+        seller_uid = 99887766
+        self.dispatcher_seller_my.dispatch({
+            "message": {
+                "message_id": 1,
+                "chat": {"id": seller_uid},
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "text": "Start New Listing",
+            }
+        })
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_b2",
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "Home & Garden",
+            }
+        })
+        for val in ["Premium Betta Pair", "Show grade Betta", "1", "012345678"]:
+            self.dispatcher_seller_my.dispatch({
+                "message": {
+                    "message_id": 2,
+                    "chat": {"id": seller_uid},
+                    "from": {"id": seller_uid, "username": "AquaSeller2"},
+                    "text": val,
+                }
+            })
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_cat_auc",
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "Auction",
+            }
+        })
+        for price_val in ["20", "50", "5"]:
+            self.dispatcher_seller_my.dispatch({
+                "message": {
+                    "message_id": 3,
+                    "chat": {"id": seller_uid},
+                    "from": {"id": seller_uid, "username": "AquaSeller2"},
+                    "text": price_val,
+                }
+            })
+
+        # Calendar date selection for Auction
+        res_cal = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_date_auc",
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "cbcal_0_set-day_2026_10_20",
+            }
+        })
+        self.assertEqual(res_cal["action"], "auction_date_selected")
+        self.assertEqual(res_cal["date"], "20-10-2026")
+
+        # Time picker selection for Auction
+        res_time = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_time_auc",
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "hour_03 PM",
+            }
+        })
+        self.assertEqual(res_time["action"], "selected_auction_time")
+        self.assertEqual(res_time["time"], "15:00")
+
+        # Duration preset selection for Auction
+        res_end = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_end_auc",
+                "from": {"id": seller_uid, "username": "AquaSeller2"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "3_days_auction",
+            }
+        })
+        self.assertEqual(res_end["action"], "selected_end_time_preset")
+
+    def test_seller_deposit_proof_request_creation_and_dashboard_approval(self):
+        """Verifies seller deposit proof submits as PENDING and credits only upon dashboard approval."""
+        from apps.finance.models import DepositProofRequest, DepositStatus, FinancialAccount, AccountType
+        seller_uid = 55443322
+        # Start deposit flow
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_dep_1",
+                "from": {"id": seller_uid, "username": "DepositSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": f"wallet_amount_save_50",
+            }
+        })
+        self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_dep_2",
+                "from": {"id": seller_uid, "username": "DepositSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": f"give_payment_details_{seller_uid}",
+            }
+        })
+        # Send photo
+        self.dispatcher_seller_my.dispatch({
+            "message": {
+                "message_id": 10,
+                "chat": {"id": seller_uid},
+                "from": {"id": seller_uid, "username": "DepositSeller"},
+                "photo": [{"file_id": "test_proof_photo_123", "file_size": 5000}],
+            }
+        })
+        # Submit confirmation
+        res_submit = self.dispatcher_seller_my.dispatch({
+            "callback_query": {
+                "id": "cb_dep_3",
+                "from": {"id": seller_uid, "username": "DepositSeller"},
+                "message": {"chat": {"id": seller_uid}},
+                "data": "submit_yes_payment",
+            }
+        })
+        self.assertEqual(res_submit["action"], "submitted_payment")
+
+        # Verify DepositProofRequest is PENDING
+        deposit_req = DepositProofRequest.objects.filter(
+            tenant=self.tenant_my,
+            telegram_user_id=str(seller_uid),
+            status=DepositStatus.PENDING,
+        ).first()
+        self.assertIsNotNone(deposit_req)
+        self.assertEqual(deposit_req.amount, 50)
+
+        # Seller wallet must NOT be credited yet
+        wallet = FinancialAccount.objects.filter(
+            tenant=self.tenant_my,
+            owner_id=str(seller_uid),
+            account_type=AccountType.USER_WALLET,
+        ).first()
+        self.assertTrue(wallet is None or wallet.available_balance == 0)
+
+        # Approve via dashboard action
+        from django.contrib.auth.models import User
+        admin_user = User.objects.create_superuser("admin_test", "admin@test.com", "pass123")
+        self.client.force_login(admin_user)
+        session = self.client.session
+        session["active_tenant_id"] = self.tenant_my.id
+        session.save()
+
+        resp = self.client.post(f"/dashboard/wallets/deposits/{deposit_req.id}/approve/", follow=True)
+        self.assertEqual(resp.status_code, 200)
+
+        deposit_req.refresh_from_db()
+        self.assertEqual(deposit_req.status, DepositStatus.APPROVED)
+
+        # Seller wallet must now have $50.00
+        wallet = FinancialAccount.objects.get(
+            tenant=self.tenant_my,
+            owner_id=str(seller_uid),
+            account_type=AccountType.USER_WALLET,
+        )
+        self.assertEqual(wallet.available_balance, 50)
+
 
 
 

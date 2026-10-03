@@ -337,9 +337,11 @@ class SellerWorkflow:
                 chat_id=chat_id,
                 text=f"Date selected: {text_clean}\n\n/cancel",
             )
+            time_kb = SellerKeyboards.create_time_keyboard()
             self.telegram_service.send_message(
                 chat_id=chat_id,
                 text=SellerMessages.START_TIME_PROMPT,
+                reply_markup=time_kb,
             )
             return {"handled": True, "action": "received_start_date"}
 
@@ -421,7 +423,7 @@ class SellerWorkflow:
             time_kb = SellerKeyboards.create_time_keyboard()
             self.telegram_service.send_message(
                 chat_id=chat_id,
-                text="Start Time:\n\n/cancel",
+                text=SellerMessages.START_TIME_PROMPT,
                 reply_markup=time_kb,
             )
             return {"handled": True, "action": "received_buynow_start_date"}
@@ -497,7 +499,27 @@ class SellerWorkflow:
         return {"handled": True, "action": "cancelled"}
 
     def start_new_listing(self, user: TelegramUser, chat_id: int) -> Dict[str, Any]:
-        """Initiates the product listing creation wizard."""
+        """Initiates the product listing creation wizard after verifying wallet balance."""
+        from apps.finance.models import FinancialAccount, AccountType
+        tenant_meta = getattr(self.tenant, "metadata", {}) or {}
+        listing_fee = Decimal(str(tenant_meta.get("listing_fee", "0.00") or "0.00"))
+
+        wallet_acc = FinancialAccount.objects.filter(
+            tenant=self.tenant,
+            owner_id=str(user.telegram_user_id),
+            account_type=AccountType.USER_WALLET,
+        ).first()
+        available_balance = wallet_acc.available_balance if wallet_acc else Decimal("0.00")
+
+        # If listing fee is configured and balance < fee, reject
+        if listing_fee > Decimal("0.00") and available_balance < listing_fee:
+            self.telegram_service.send_message(
+                chat_id=chat_id,
+                text=SellerMessages.INSUFFICIENT_WALLET_CREATE,
+                reply_markup=SellerKeyboards.wallet_add_money(user.telegram_user_id),
+            )
+            return {"handled": True, "action": "insufficient_wallet_balance"}
+
         conv = self._get_conversation_state(user)
         conv.state = "CREATING_LISTING"
         conv.step = SellerWorkflowStep.BREED
@@ -613,7 +635,7 @@ class SellerWorkflow:
                     time_kb = SellerKeyboards.create_past_time_keyboard(curr_hour) if is_today else SellerKeyboards.create_time_keyboard()
                     self.telegram_service.send_message(
                         chat_id=chat_id,
-                        text="Start Time:\n\n/cancel",
+                        text=SellerMessages.START_TIME_PROMPT,
                         reply_markup=time_kb,
                     )
                     return {"handled": True, "action": "buynow_date_selected", "date": date_str}
@@ -633,9 +655,13 @@ class SellerWorkflow:
                         chat_id=chat_id,
                         text=f"Date selected: {date_str}\n\n/cancel",
                     )
+                    is_today = selected_date == timezone.localdate()
+                    curr_hour = timezone.localtime().hour if is_today else 0
+                    time_kb = SellerKeyboards.create_past_time_keyboard(curr_hour) if is_today else SellerKeyboards.create_time_keyboard()
                     self.telegram_service.send_message(
                         chat_id=chat_id,
                         text=SellerMessages.START_TIME_PROMPT,
+                        reply_markup=time_kb,
                     )
                     return {"handled": True, "action": "auction_date_selected", "date": date_str}
             return {"handled": True, "action": "calendar_ignored"}
@@ -648,27 +674,53 @@ class SellerWorkflow:
                 time_24 = datetime.strptime(time_part, "%I %p").strftime("%H:00")
             except Exception:
                 time_24 = time_part
-            ctx["buynow_start_time"] = time_24
-            conv.step = SellerWorkflowStep.BUYNOW_DAYS
-            conv.context_data = ctx
-            conv.save(update_fields=["step", "context_data", "updated_at"])
 
-            if callback_id:
-                self.telegram_service.answer_callback_query(callback_id, f"Time: {time_part}")
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text="Start Time:",
-            )
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text=f"Selected time: {time_part}\n\n/cancel",
-            )
-            self.telegram_service.send_message(
-                chat_id=chat_id,
-                text=SellerMessages.BUYNOW_DURATION_PROMPT,
-                reply_markup=SellerKeyboards.buynow_days_options(),
-            )
-            return {"handled": True, "action": "selected_buynow_time", "time": time_24}
+            is_buynow = conv.step == SellerWorkflowStep.BUYNOW_START_TIME or ctx.get("category") == "Buy It Now"
+
+            if is_buynow:
+                ctx["buynow_start_time"] = time_24
+                conv.step = SellerWorkflowStep.BUYNOW_DAYS
+                conv.context_data = ctx
+                conv.save(update_fields=["step", "context_data", "updated_at"])
+
+                if callback_id:
+                    self.telegram_service.answer_callback_query(callback_id, f"Time: {time_part}")
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text="Start Time:",
+                )
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=f"Selected time: {time_part}\n\n/cancel",
+                )
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=SellerMessages.BUYNOW_DURATION_PROMPT,
+                    reply_markup=SellerKeyboards.buynow_days_options(),
+                )
+                return {"handled": True, "action": "selected_buynow_time", "time": time_24}
+            else:
+                ctx["start_time"] = time_24
+                conv.step = SellerWorkflowStep.AUCTION_END_TIME
+                conv.context_data = ctx
+                conv.save(update_fields=["step", "context_data", "updated_at"])
+
+                if callback_id:
+                    self.telegram_service.answer_callback_query(callback_id, f"Time: {time_part}")
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text="Start Time:",
+                )
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=f"Selected time: {time_part}\n\n/cancel",
+                )
+                self.telegram_service.send_message(
+                    chat_id=chat_id,
+                    text=SellerMessages.END_TIME_PROMPT,
+                    reply_markup=SellerKeyboards.end_time_presets(),
+                )
+                return {"handled": True, "action": "selected_auction_time", "time": time_24}
 
         # 5. Buy Now Duration Presets (10_days_buynow, 20_days_buynow, 30_days_buynow)
         elif data.endswith("_days_buynow"):
@@ -781,18 +833,19 @@ class SellerWorkflow:
         elif data == "submit_yes_payment":
             amount_to_add = ctx.get("amount_to_add", "10")
             photo_path = ctx.get("payment_proof_image", "")
-            from apps.finance.services import deposit
+            from apps.finance.models import DepositProofRequest, DepositStatus
             try:
-                deposit(
+                DepositProofRequest.objects.create(
                     tenant=self.tenant,
-                    user_id=str(user.telegram_user_id),
-                    amount=Decimal(amount_to_add),
-                    currency=getattr(self.tenant, "currency", "MYR") or "MYR",
-                    description=f"Seller wallet deposit via Telegram proof {photo_path}",
-                    metadata={"payment_proof": photo_path, "username": user.username or ""}
+                    telegram_user_id=str(user.telegram_user_id),
+                    telegram_username=user.username or "",
+                    amount=Decimal(str(amount_to_add)),
+                    currency=getattr(self.tenant, "currency", "USD") or "USD",
+                    proof_image=photo_path,
+                    status=DepositStatus.PENDING,
                 )
             except Exception as e:
-                logger.error("Failed to deposit funds for user %s: %s", user.telegram_user_id, e)
+                logger.error("Failed to create deposit proof request for user %s: %s", user.telegram_user_id, e)
 
             conv.step = SellerWorkflowStep.IDLE
             conv.context_data = {}
@@ -1141,6 +1194,24 @@ class SellerWorkflow:
             listing.metadata["video"] = video_rel_path
             listing.metadata["video_file_id"] = video_file_id
             listing.save(update_fields=["metadata", "updated_at"])
+
+        # Deduct listing fee if configured
+        tenant_meta = getattr(self.tenant, "metadata", {}) or {}
+        listing_fee = Decimal(str(tenant_meta.get("listing_fee", "0.00") or "0.00"))
+        if listing_fee > Decimal("0.00"):
+            from apps.finance.services import debit_account
+            try:
+                debit_account(
+                    tenant=self.tenant,
+                    user_id=str(user.telegram_user_id),
+                    amount=listing_fee,
+                    currency=getattr(self.tenant, "currency", "USD") or "USD",
+                    reference_type="LISTING_FEE",
+                    reference_id=str(listing.id),
+                    description=f"Listing creation fee for #{listing.id} ({listing.title})",
+                )
+            except Exception as fee_exc:
+                logger.warning("Could not debit listing fee for user %s: %s", user.telegram_user_id, fee_exc)
 
         # Reset state
         conv.state = "IDLE"

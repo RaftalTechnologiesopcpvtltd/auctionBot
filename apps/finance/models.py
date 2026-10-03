@@ -247,3 +247,42 @@ class LedgerEntry(models.Model):
         raise ImmutableLedgerError(
             f"Cannot delete ledger entry {self.pk}: ledger records are immutable."
         )
+
+
+class DepositStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending Approval"
+    APPROVED = "APPROVED", "Approved"
+    REJECTED = "REJECTED", "Rejected"
+
+
+class DepositProofRequest(TenantOwnedModel):
+    """
+    Tracks seller deposit submissions through Telegram before admin approval.
+    When approved by client/admin:
+    - Deducts from Tenant Client pool / Credits Seller Wallet.
+    - Emits immutable double-entry ledger records.
+    """
+    telegram_user_id = models.CharField(max_length=128, db_index=True)
+    telegram_username = models.CharField(max_length=150, blank=True, default="")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    currency = models.CharField(max_length=3, default="MYR")
+    proof_image = models.CharField(max_length=500, blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=DepositStatus.choices,
+        default=DepositStatus.PENDING,
+        db_index=True
+    )
+    admin_notes = models.CharField(max_length=255, blank=True, default="")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "status", "telegram_user_id"]),
+            models.Index(fields=["tenant", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Deposit #{self.pk} - {self.telegram_user_id} - {self.currency} {self.amount} ({self.status})"

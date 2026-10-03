@@ -650,7 +650,8 @@ def telegram_users_view(request):
 
 @dashboard_auth_required
 def wallets_list_view(request):
-    """Wallets overview matching screen 6.jpeg."""
+    """Wallets overview with seller deposit proof approval workflow."""
+    from apps.finance.models import DepositProofRequest, DepositStatus
     tenant = request.tenant
     q = request.GET.get("q", "").strip()
 
@@ -666,10 +667,18 @@ def wallets_list_view(request):
     total_debits = entries.filter(entry_type=EntryType.DEBIT).aggregate(val=Sum("amount"))["val"] or Decimal("0.00")
     wallet_users_count = accounts.filter(account_type=AccountType.USER_WALLET).count()
 
+    # Deposit Proof Requests
+    deposit_requests = DepositProofRequest.objects.filter(tenant=tenant).order_by("-created_at")
+    pending_deposit_count = deposit_requests.filter(status=DepositStatus.PENDING).count()
+
     if q:
         accounts = accounts.filter(
             Q(owner_id__icontains=q) |
             Q(account_type__icontains=q)
+        )
+        deposit_requests = deposit_requests.filter(
+            Q(telegram_user_id__icontains=q) |
+            Q(telegram_username__icontains=q)
         )
 
     paginator = Paginator(accounts, 10)
@@ -682,10 +691,99 @@ def wallets_list_view(request):
         "total_credits": total_credits,
         "total_debits": total_debits,
         "wallet_users_count": wallet_users_count,
+        "deposit_requests": deposit_requests[:20],
+        "pending_deposit_count": pending_deposit_count,
         "q": q,
         "page_obj": page_obj,
     }
     return render(request, "dashboard/finance/wallets.html", context)
+
+
+@dashboard_auth_required
+@require_POST
+def deposit_approve_action(request, deposit_id):
+    """Approve a seller deposit request: credit seller wallet, debit/record in ledger, and notify seller on Telegram."""
+    from apps.finance.models import DepositProofRequest, DepositStatus
+    tenant = request.tenant
+    deposit_req = get_object_or_404(DepositProofRequest, id=deposit_id, tenant=tenant)
+
+    if deposit_req.status != DepositStatus.PENDING:
+        messages.warning(request, f"Deposit #{deposit_id} is already {deposit_req.status}.")
+        return redirect("dashboard:wallets_list")
+
+    try:
+        # Credit seller wallet via authoritative double-entry finance service
+        finance_service.deposit(
+            tenant=tenant,
+            user_id=deposit_req.telegram_user_id,
+            amount=deposit_req.amount,
+            currency=deposit_req.currency,
+            description=f"Seller deposit approved by admin ({request.user.username})",
+            metadata={
+                "deposit_request_id": deposit_req.id,
+                "approved_by": request.user.username,
+                "proof_image": deposit_req.proof_image,
+            },
+        )
+        deposit_req.status = DepositStatus.APPROVED
+        deposit_req.approved_at = timezone.now()
+        deposit_req.approved_by = request.user.username
+        deposit_req.save(update_fields=["status", "approved_at", "approved_by", "updated_at"])
+
+        # Notify seller on Telegram bot
+        seller_cfg = TelegramBotConfig.objects.filter(tenant=tenant, bot_type="SELLER", is_active=True).first() or \
+                     TelegramBotConfig.objects.filter(tenant=tenant, is_active=True).first()
+        if seller_cfg:
+            seller_svc = TelegramService(seller_cfg)
+            try:
+                seller_svc.send_message(
+                    chat_id=int(deposit_req.telegram_user_id),
+                    text=f"✅ Great news! Your deposit of ${deposit_req.amount} has been approved and credited to your wallet balance."
+                )
+            except Exception as tg_err:
+                logger.warning("Could not send Telegram deposit notification to %s: %s", deposit_req.telegram_user_id, tg_err)
+
+        messages.success(request, f"Deposit #{deposit_id} for ${deposit_req.amount} approved and credited to User {deposit_req.telegram_user_id}.")
+    except Exception as exc:
+        messages.error(request, f"Failed to approve deposit: {exc}")
+
+    return redirect("dashboard:wallets_list")
+
+
+@dashboard_auth_required
+@require_POST
+def deposit_reject_action(request, deposit_id):
+    """Reject a seller deposit request and notify seller."""
+    from apps.finance.models import DepositProofRequest, DepositStatus
+    tenant = request.tenant
+    deposit_req = get_object_or_404(DepositProofRequest, id=deposit_id, tenant=tenant)
+
+    if deposit_req.status != DepositStatus.PENDING:
+        messages.warning(request, f"Deposit #{deposit_id} is already {deposit_req.status}.")
+        return redirect("dashboard:wallets_list")
+
+    reason = request.POST.get("reason", "Payment verification failed")
+    deposit_req.status = DepositStatus.REJECTED
+    deposit_req.admin_notes = reason
+    deposit_req.approved_at = timezone.now()
+    deposit_req.approved_by = request.user.username
+    deposit_req.save(update_fields=["status", "admin_notes", "approved_at", "approved_by", "updated_at"])
+
+    # Notify seller on Telegram
+    seller_cfg = TelegramBotConfig.objects.filter(tenant=tenant, bot_type="SELLER", is_active=True).first() or \
+                 TelegramBotConfig.objects.filter(tenant=tenant, is_active=True).first()
+    if seller_cfg:
+        seller_svc = TelegramService(seller_cfg)
+        try:
+            seller_svc.send_message(
+                chat_id=int(deposit_req.telegram_user_id),
+                text=f"❌ Your deposit request of ${deposit_req.amount} was rejected.\nReason: {reason}"
+            )
+        except Exception as tg_err:
+            logger.warning("Could not send Telegram reject notification to %s: %s", deposit_req.telegram_user_id, tg_err)
+
+    messages.warning(request, f"Deposit #{deposit_id} for ${deposit_req.amount} rejected.")
+    return redirect("dashboard:wallets_list")
 
 
 @dashboard_auth_required
@@ -845,13 +943,66 @@ def business_settings_view(request):
             tenant.timezone = timezone_val
         if currency_val:
             tenant.currency = currency_val
+
+        # Metadata configuration
+        meta = dict(tenant.metadata or {})
+        listing_fee_val = request.POST.get("listing_fee", "").strip()
+        bank_details_val = request.POST.get("bank_details", "").strip()
+        helpdesk_details_val = request.POST.get("helpdesk_details", "").strip()
+        group_details_val = request.POST.get("group_details", "").strip()
+        about_us_val = request.POST.get("about_us", "").strip()
+
+        if listing_fee_val:
+            try:
+                meta["listing_fee"] = str(Decimal(listing_fee_val).quantize(Decimal("0.01")))
+            except Exception:
+                pass
+        if bank_details_val:
+            meta["bank_details"] = bank_details_val
+        if helpdesk_details_val:
+            meta["helpdesk_details"] = helpdesk_details_val
+        if group_details_val:
+            meta["group_details"] = group_details_val
+        if about_us_val:
+            meta["about_us"] = about_us_val
+
+        tenant.metadata = meta
         tenant.save()
+
+        # Allocate tenant client initial credit if submitted by platform admin
+        allocate_credit_val = request.POST.get("allocate_credit", "").strip()
+        if allocate_credit_val and is_platform_admin(request.user):
+            try:
+                alloc_amt = Decimal(allocate_credit_val)
+                if alloc_amt > Decimal("0.00"):
+                    cash_acc = finance_service.get_system_account(
+                        tenant=tenant,
+                        account_type=AccountType.PLATFORM_CASH,
+                        currency=tenant.currency,
+                    )
+                    # Directly adjust or credit tenant platform pool
+                    cash_acc.available_balance += alloc_amt
+                    cash_acc.save(update_fields=["available_balance", "updated_at"])
+                    messages.success(request, f"Successfully allocated {tenant.currency} {alloc_amt} credit pool to {tenant.name}.")
+            except Exception as e:
+                messages.error(request, f"Failed to allocate credit: {e}")
+
         messages.success(request, "Business settings updated successfully.")
         return redirect("dashboard:settings")
+
+    # Get platform pool balance
+    cash_acc = FinancialAccount.objects.filter(
+        tenant=tenant,
+        account_type=AccountType.PLATFORM_CASH,
+        currency=tenant.currency
+    ).first()
+    platform_pool_balance = cash_acc.available_balance if cash_acc else Decimal("0.00")
 
     context = {
         "page_title": "Business Settings",
         "tenant": tenant,
+        "platform_pool_balance": platform_pool_balance,
+        "is_platform_admin": is_platform_admin(request.user),
     }
     return render(request, "dashboard/settings/business.html", context)
 

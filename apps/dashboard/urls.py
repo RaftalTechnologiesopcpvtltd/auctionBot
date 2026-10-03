@@ -40,6 +40,8 @@ urlpatterns = [
     # Wallets & Financial Ledger
     path("wallets/", views.wallets_list_view, name="wallets_list"),
     path("wallets/accounts/", views.wallets_list_view, name="finance_wallets"),
+    path("wallets/deposits/<int:deposit_id>/approve/", views.deposit_approve_action, name="deposit_approve"),
+    path("wallets/deposits/<int:deposit_id>/reject/", views.deposit_reject_action, name="deposit_reject"),
     path("transactions/", views.transactions_list_view, name="transactions_list"),
     path("transactions/ledger/", views.transactions_list_view, name="finance_transactions"),
     path("transactions/<int:transaction_id>/", views.transaction_detail_view, name="transaction_detail"),

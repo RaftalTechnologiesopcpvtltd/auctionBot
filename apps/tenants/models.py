@@ -67,6 +67,11 @@ class Tenant(models.Model):
         blank=True,
         help_text="Primary administrative account username for this tenant.",
     )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Tenant configuration metadata, fee schedules, bank details, etc.",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         db_index=True,

@@ -623,11 +623,10 @@ def telegram_users_view(request):
     new_users = qs.filter(created_at__gte=timezone.now() - timedelta(days=30)).count()
 
     if q:
-        qs = qs.filter(
-            Q(username__icontains=q) |
-            Q(first_name__icontains=q) |
-            Q(telegram_id__icontains=q)
-        )
+        filter_q = Q(username__icontains=q) | Q(first_name__icontains=q) | Q(last_name__icontains=q)
+        if q.isdigit():
+            filter_q |= Q(telegram_user_id=int(q))
+        qs = qs.filter(filter_q)
 
     paginator = Paginator(qs, 10)
     page_number = request.GET.get("page")

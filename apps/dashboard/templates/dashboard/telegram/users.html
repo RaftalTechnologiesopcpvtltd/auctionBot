@@ -83,7 +83,7 @@
                     {% for u in page_obj %}
                     <tr class="hover:bg-slate-50/60 transition-colors">
                         <td class="py-3.5 px-4 font-semibold text-slate-900">{{ forloop.counter }}</td>
-                        <td class="py-3.5 px-4 font-mono text-slate-600">{{ u.telegram_id }}</td>
+                        <td class="py-3.5 px-4 font-mono font-medium text-slate-700 bg-slate-50/50 rounded">{{ u.telegram_user_id }}</td>
                         <td class="py-3.5 px-4 font-bold text-blue-600">@{{ u.username|default:"unknown" }}</td>
                         <td class="py-3.5 px-4 text-slate-900">{{ u.first_name }} {{ u.last_name|default:"" }}</td>
                         <td class="py-3.5 px-4 text-slate-500">{{ u.created_at|date:"d M Y, H:i" }}</td>
